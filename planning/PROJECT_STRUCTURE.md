@@ -2,28 +2,30 @@
 
 | Field | Detail |
 |---|---|
-| **System** | HIMA IF CMS |
-| **Document Version** | 1.1.0 |
-| **Date** | 14 October 2026 |
+| **System** | HIMA IF CMS (Modern WordPress-like Blog Engine) |
+| **Document Version** | 2.0.0 |
+| **Date** | 2026-10-23 |
 | **Status** | Approved Specification |
 | **Monorepo Layout** | Decoupled Architecture (`/frontend` + `/backend` + `/docker`) |
-| **Frontend Runtime** | Node.js 22 LTS / Bun (Next.js 15+ App Router) |
-| **Backend Runtime** | Python 3.12+ (FastAPI + Asyncpg + Celery 5.4+) |
+| **Frontend Runtime** | Node.js 22 LTS (Next.js 15+ App Router, React 19, TipTap 2.x) |
+| **Backend Runtime** | Python 3.12+ (FastAPI + SQLAlchemy 2.0 Async + Rust nh3) |
 
 ---
 
 ## Riwayat Revisi (Revision History)
 
-| Versi | Tanggal | Penulis | Ringkasan Perubahan | Alasan |
-|---|---|---|---|---|
-| 1.0.0 | 13 Oktober 2026 | Staff Ahli Divisi MIK (Proker Informasite) | Draf awal struktur repositori monorepo. | Inisiasi arsitektur berkas dan folder. |
-| 1.1.0 | 14 Oktober 2026 | Staff Ahli Divisi MIK & Antigravity Auditor | Penambahan berkas arsitektur (`src/middleware.ts`, `app/core/encryption.py`, `app/tasks/cleanup_tasks.py`, `app/db/seed.py`), konfigurasi 3 instance Redis terpisah, variabel Turnstile dan kunci enkripsi PIN pada `.env.example`, penyesuaian workspace evaluasi berbasis `[booking_id]`, dan pemeliharaan referensi `/fixed_md`. | Penyelarasan dengan spesifikasi keamanan v2.0.0 dan pemisahan concern tugas latar belakang. |
+| Versi | Tanggal | Penulis / Reviewer | Bagian yang Diubah | Rincian Perubahan (Sebelum vs Sesudah) | Alasan Perubahan |
+|---|---|---|---|---|---|
+| 1.0.0 | 2026-10-13 | Staff Ahli Divisi MIK | Dokumen Baru | Draf awal struktur repositori monorepo dual-engine. | Inisiasi arsitektur berkas monorepo. |
+| 1.1.0 | 14 Oktober 2026 | Staff Ahli MIK & Auditor | Task & Redis | Penambahan cleanup tasks, 3 instance Redis, enkripsi PIN. | Mitigasi audit keamanan v2.0.0. |
+| 1.2.0 | 14 Oktober 2026 | Staff Ahli MIK & Architect | Harmonization | Penyelarasan env S3/R2, perintah reencrypt-pins, standardisasi broker. | Eliminasi ambiguitas konfigurasi. |
+| 2.0.0 | 2026-10-23 | Staff Ahli MIK & Antigravity Lead | Seluruh Dokumen | **Sebelum:** Direktori Celery worker/tasks, modul formulir dinamis & interview booking, segregasi 3 instance Redis.<br>**Sesudah:** Eliminasi seluruh komponen formulir & Celery tasks, adopsi struktur murni Blog CMS sekelas WordPress, penyatuan 1 instance Redis di Docker Compose, perapian TipTap components di frontend, dan standarisasi konfigurasi deployment bertahap (Hostinger $\to$ Kampus Tel-U). | Pivot arsitektur WordPress-like Blog CMS, penyederhanaan tumpukan teknologi, dan portabilitas deploy. |
 
 ---
 
 ## 1. Root Repository Overview
 
-Proyek diorganisir sebagai **Decoupled Monorepo** di dalam satu repository Git, mempermudah koordinasi deployment via Docker Compose namun tetap menjaga pemisahan *concerns* yang ketat:
+Proyek dikelola sebagai **Decoupled Monorepo** di dalam satu repository Git:
 
 ```
 himaiftelkomuniv/
@@ -33,261 +35,252 @@ himaiftelkomuniv/
 │       └── backend-ci.yml
 ├── docker/                       # Konfigurasi containerization multi-service
 │   ├── nginx/
-│   │   ├── conf.d/default.conf   # Nginx reverse proxy satu origin & rate limiting config
-│   │   └── ssl/                  # Sertifikat SSL lokal / staging
-│   ├── docker-compose.yml        # Orchestration lokal: PostgreSQL, 3x Redis, S3-storage
-│   ├── docker-compose.prod.yml   # Orchestration produksi lengkap
+│   │   ├── conf.d/
+│   │   │   ├── default.conf      # Reverse proxy satu origin, R2 cache 5GB, rate limit
+│   │   │   └── redirect_301.conf # Template redirector permanen untuk domain lama
+│   │   └── ssl/                  # Sertifikat SSL
+│   ├── docker-compose.yml        # Orchestration lokal: PostgreSQL, 1x Redis, Nginx
+│   ├── docker-compose.prod.yml   # Orchestration produksi (Hostinger / VPS Kampus)
 │   ├── Dockerfile.frontend       # Multi-stage Next.js production build
 │   └── Dockerfile.backend        # Multi-stage Python FastAPI production build
-├── backend/                      # Backend API Service (FastAPI + Celery)
-├── frontend/                     # Frontend Application (Next.js App Router)
-├── fixed_md/                     # Dokumentasi acuan awal organisasi (dipertahankan)
-├── new_md/                       # Dokumen perencanaan teknis mutakhir
+├── backend/                      # Backend API Service (FastAPI + SQLAlchemy 2.0)
+├── frontend/                     # Frontend Application (Next.js App Router + TipTap)
+├── planning/                     # Dokumen perencanaan teknis master (10 berkas acuan)
 ├── .gitignore
 ├── .env.example                  # Template variabel lingkungan terpadu
-└── README.md                     # Panduan setup & orientasi pengembang baru
+└── README.md                     # Panduan setup & orientasi pengembang
 ```
 
 ---
 
 ## 2. Struktur Direktori Frontend (`/frontend`)
 
-Frontend dibangun menggunakan **Next.js 15+ (App Router)** dengan arsitektur modular:
+Frontend dibangun menggunakan **Next.js 15+ (App Router)** dengan styling Tailwind CSS dan komponen `shadcn/ui`:
 
 ```
 frontend/
-├── public/                       # Aset statis publik (logo HIMA IF, favicons, illustrations)
-│   ├── icons/
-│   └── images/
+├── public/                       # Aset statis publik (logo HIMA IF, favicons, dummy)
 ├── src/
-│   ├── middleware.ts             # Edge UX routing middleware (baca refresh token untuk UX redirect)
-│   ├── app/                      # Next.js App Router (Routing, Layouts, Pages)
-│   │   ├── (public)/             # Route Group: Halaman publik tanpa autentikasi
-│   │   │   ├── layout.tsx        # Layout publik (Navbar, Footer, Lenis Provider)
-│   │   │   ├── page.tsx          # Homepage HIMA IF (Hero, Latest News, Active Events)
+│   ├── middleware.ts             # UX Routing Guard (redirect login / dashboard)
+│   ├── app/                      # Next.js App Router
+│   │   ├── (public)/             # Route Group: Portal Publik (SEO SSR)
+│   │   │   ├── layout.tsx        # Layout publik (Navbar, Footer, Lenis Smooth Scroll)
+│   │   │   ├── page.tsx          # Homepage (Hero, Berita Terkini, Kategori Unggulan)
 │   │   │   ├── blog/
-│   │   │   │   ├── page.tsx      # Arsip Blog (Paginasi, filter kategori, search)
+│   │   │   │   ├── page.tsx      # Arsip Blog (Pagination, Filter Kategori/Tag, Search)
 │   │   │   │   └── [slug]/
-│   │   │   │       └── page.tsx  # Halaman detail artikel blog (SSR + SEO Meta)
-│   │   │   ├── forms/
-│   │   │   │   └── [slug]/
-│   │   │   │       └── page.tsx  # Form Wizard publik (Dynamic fields + Multi-Slot picker + Turnstile)
-│   │   │   └── status/
-│   │   │       └── page.tsx      # Cek status pendaftaran & reschedule mandiri (Code + NIM + PIN)
-│   │   ├── (auth)/               # Route Group: Halaman login internal
-│   │   │   └── login/
-│   │   │       └── page.tsx      # Portal login pseudo-email untuk seluruh role
-│   │   ├── admin/                # Route Group: Dashboard terproteksi (RBAC)
-│   │   │   ├── layout.tsx        # Shell layout dashboard (Sidebar, Header, Breadcrumbs)
-│   │   │   ├── page.tsx          # Role-based landing dashboard router
-│   │   │   ├── super/            # Sub-dashboard khusus Super Admin
-│   │   │   │   ├── overview/page.tsx
-│   │   │   │   ├── blogs/        # Manajemen blog global (CRUD, Publish, Schedule)
-│   │   │   │   │   ├── page.tsx
-│   │   │   │   │   ├── new/page.tsx
-│   │   │   │   │   └── [id]/edit/page.tsx
-│   │   │   │   ├── forms/page.tsx # Sentralisasi seluruh kepanitiaan / acara
-│   │   │   │   └── users/page.tsx # Manajemen akun dan reset password global
-│   │   │   ├── master/           # Sub-dashboard khusus Master Formulir
-│   │   │   │   ├── forms/
-│   │   │   │   │   └── [id]/
-│   │   │   │   │       ├── overview/page.tsx   # Rekapitulasi pendaftar & interview
-│   │   │   │   │       ├── builder/page.tsx    # Dynamic Form Builder (Fields & Rules)
-│   │   │   │   │       ├── divisions/page.tsx  # Kelola divisi & akun divisi otomatis
-│   │   │   │   │       └── submissions/page.tsx# Seluruh pendaftar lintas divisi
-│   │   │   └── division/         # Sub-dashboard khusus Akun Divisi
-│   │   │       ├── submissions/page.tsx # Pendaftar divisinya (Divisi 1 atau 2)
-│   │   │       ├── schedule/page.tsx    # Manajemen slot & blokir jadwal interview
-│   │   │       ├── questions/page.tsx   # Custom Question Builder untuk interview
-│   │   │       └── workspace/[booking_id]/page.tsx # Split-screen workspace wawancara berbasis booking
-│   │   ├── api/                  # Next.js Route Handlers (BFF / proxy jika dibutuhkan)
-│   │   ├── globals.css           # Tailwind CSS imports & global theme CSS variables
-│   │   └── layout.tsx            # Root HTML layout (Fonts, Meta, Toast Provider)
-│   │
-│   ├── components/               # Komponen React modular
-│   │   ├── ui/                   # Komponen primitif shadcn/ui (Button, Dialog, Dropdown, dll.)
-│   │   ├── common/               # Komponen generik (Navbar, Footer, SEOHead, EmptyState)
-│   │   ├── blog/                 # Komponen khusus blog (BlogCard, BlockRenderer, SEOPanel)
-│   │   ├── editor/               # Komponen TipTap Rich Text Editor & custom block extensions
-│   │   ├── forms/                # Komponen dynamic form renderer, Turnstile widget, input fields
-│   │   ├── interview/            # Komponen slot picker multi-divisi, calendar view, rubric sheet
-│   │   └── providers/            # React context providers (Lenis, Auth, QueryClient)
-│   │
-│   ├── hooks/                    # Custom React hooks (useAuth, useDebounce, useAutoSave)
-│   ├── lib/                      # Utilities & konfigurasi library pihak ketiga
-│   │   ├── api-client.ts         # Axios / Fetch wrapper dengan interceptor JWT refresh
-│   │   ├── utils.ts              # cn helper Tailwind class merging
-│   │   ├── seo-analyzer.ts       # Algoritma perhitungan skor SEO real-time di browser
-│   │   └── constants.ts          # Enum status, batasan file, dan konfigurasi rute
-│   ├── stores/                   # State Management global via Zustand
-│   │   ├── auth-store.ts         # Session state, user identity (Access Token in-memory murni, non-persisted)
-│   │   ├── form-builder-store.ts # State interaktif builder formulir
-│   │   └── evaluation-store.ts   # State auto-save lembar kerja wawancara & optimistic version
-│   └── types/                    # Definisi TypeScript interfaces & types
-│       ├── auth.ts
-│       ├── blog.ts
-│       ├── form.ts
-│       └── interview.ts
+│   │   │   │       └── page.tsx  # Detail Artikel (SSR, Clean HTML Render, OpenGraph)
+│   │   │   ├── categories/
+│   │   │   │   └── [slug]/page.tsx # Halaman Filter Berita per Kategori
+│   │   │   ├── sitemap.ts        # Dynamic sitemap.xml generator
+│   │   │   └── robots.ts         # Dynamic robots.txt
+│   │   ├── (auth)/               # Route Group: Autentikasi
+│   │   │   ├── login/page.tsx    # Halaman Login Pengurus
+│   │   │   └── change-password/  # Halaman Paksa Ganti Password Awal
+│   │   └── (admin)/              # Route Group: CMS Dashboard (TipTap Editor)
+│   │       ├── layout.tsx        # Sidebar Admin, User Header, Session Guard
+│   │       ├── dashboard/page.tsx# Ringkasan Statistik (Total Post, Views, Draft)
+│   │       ├── posts/
+│   │       │   ├── page.tsx      # Tabel Manajemen Artikel (Filter Status, Author)
+│   │       │   ├── new/page.tsx  # Editor Artikel Baru (TipTap WYSIWYG)
+│   │       │   └── [id]/edit/    # Editor Perbarui Artikel & Riwayat Revisi
+│   │       ├── categories/       # Manajemen Kategori (Super Admin only)
+│   │       ├── tags/             # Manajemen Tags
+│   │       ├── media/            # Media Library (Upload WebP, Gallery, Copy Link)
+│   │       ├── users/            # Manajemen Akun Author (Super Admin only)
+│   │       └── audit-logs/       # Log Keamanan (Super Admin only)
+│   ├── components/
+│   │   ├── ui/                   # Komponen primitif shadcn/ui (Button, Dialog, dll.)
+│   │   ├── editor/               # TipTap Block Editor Suite
+│   │   │   ├── tiptap-editor.tsx # Komponen Utama Editor Visual
+│   │   │   ├── toolbar.tsx       # Toolbar Tombol Format Teks & Heading
+│   │   │   ├── image-dialog.tsx  # Modal Penyisipan Gambar (Media Library / Upload)
+│   │   │   ├── table-controls.tsx# Kontrol Tambah/Hapus Baris & Kolom Tabel
+│   │   │   └── extensions/       # Custom TipTap Extensions (YouTube, Spotify, Code)
+│   │   ├── blog/                 # Komponen Publik (PostCard, ShareButton, AuthorBio)
+│   │   └── layout/               # Navbar, Footer, MobileNav
+│   ├── lib/
+│   │   ├── api-client.ts         # Axios/Fetch client terstandarisasi (Relative BaseURL)
+│   │   ├── utils.ts              # Helper Tailwind (cn), formatting tanggal
+│   │   └── seo.ts                # Helper kalkulasi Reading Time & SEO meta
+│   └── stores/
+│       └── auth-store.ts         # Zustand in-memory auth state (Current User, Role)
+├── tailwind.config.ts            # Konfigurasi Tailwind CSS v3.4.x LTS
 ├── package.json
-├── tailwind.config.ts
-├── tsconfig.json
-└── next.config.ts
+└── tsconfig.json
 ```
 
 ---
 
 ## 3. Struktur Direktori Backend (`/backend`)
 
-Backend dibangun menggunakan **Python 3.12+ dan FastAPI** dengan pola *Service-Repository*:
+Backend dibangun menggunakan **Python FastAPI** dengan pendekatan asinkron modular:
 
 ```
 backend/
-├── alembic/                      # Script migrasi database SQLAlchemy
-│   ├── versions/                 # File revisi migrasi terurut
+├── alembic/                      # Database Migration Engine
+│   ├── versions/
+│   │   ├── 001_auth_and_sessions.py
+│   │   └── 002_blog_cms_and_media.py
 │   └── env.py
 ├── app/
-│   ├── api/                      # Routing layer & endpoint HTTP controllers
-│   │   ├── v1/
-│   │   │   ├── router.py         # Master router agregasi v1
-│   │   │   ├── endpoints/
-│   │   │   │   ├── auth.py       # Login pseudo-email, refresh ES256, change-password, me
-│   │   │   │   ├── users.py      # Pengelolaan user & reset password hierarkis
-│   │   │   │   ├── blog.py       # CRUD artikel, kategori, revisi, publish, Version Tag cache
-│   │   │   │   ├── media.py      # Upload berkas & gambar (Pillow), presigned URL vault
-│   │   │   │   ├── forms.py      # Dynamic form CRUD & field builder
-│   │   │   │   ├── divisions.py  # Divisi & auto-provisioning akun divisi (must_change_password)
-│   │   │   │   ├── submissions.py# Penerimaan form (2 slot), verify-status, reset-pin
-│   │   │   │   ├── interviews.py # Generator slot, blocking, public reschedule H-1
-│   │   │   │   ├── evaluations.py# Workspace evaluasi berbasis booking_id & optimistic locking
-│   │   │   │   └── analytics.py  # Rekapitulasi sentralisasi & ekspor XLSX/CSV RESTful
-│   │   └── deps.py               # Dependency injection (DB session, Current User, RBAC scope guards)
-│   │
-│   ├── core/                     # Konfigurasi inti aplikasi
-│   │   ├── config.py             # Pydantic BaseSettings (membaca file .env)
-│   │   ├── security.py           # Hashing password (Argon2id OWASP) & JWT asimetris (ES256)
-│   │   ├── encryption.py         # Enkripsi simetris tracking_pin pelamar (AES-256-GCM / Fernet)
-│   │   ├── redis.py              # Konektor pool 3 instance Redis (Cache, Broker, Session)
-│   │   └── exceptions.py         # Custom exception handler & HTTP error mappings RFC 7807
-│   │
-│   ├── db/                       # Konfigurasi database relasional
-│   │   ├── base.py               # SQLAlchemy DeclarativeBase
-│   │   ├── session.py            # Async engine & sessionmaker (asyncpg)
-│   │   └── seed.py               # Script seeding initial akun Super Admin & kategori bawaan
-│   │
-│   ├── models/                   # Definisi entitas database SQLAlchemy ORM
-│   │   ├── user.py               # Model User & AuthAuditLog
-│   │   ├── blog.py               # Model BlogPost, Category, Revision
-│   │   ├── media.py              # Model MediaAsset (S3 storage)
-│   │   ├── form.py               # Model Form, FormDivision, FormField
-│   │   ├── submission.py         # Model FormSubmission (PIN terenkripsi, status keputusan)
-│   │   ├── interview.py          # Model ScheduleConfig, InterviewSlot, InterviewBooking (evaluasi terlebur)
-│   │   └── evaluation.py         # Model InterviewQuestionSet, InterviewQuestion, EvaluationAnswer
-│   │
-│   ├── schemas/                  # Schema validasi data input/output Pydantic v2
+│   ├── api/                      # Routing & Controller Tier
+│   │   └── v1/
+│   │       ├── api.py            # Aggregator Router API v1
+│   │       └── endpoints/
+│   │           ├── auth.py       # Login, Logout, Me, Change Password
+│   │           ├── users.py      # CRUD Akun Penulis (Super Admin)
+│   │           ├── categories.py # CRUD Kategori Artikel
+│   │           ├── tags.py       # CRUD & Search Tags
+│   │           ├── posts.py      # CRUD Artikel, Publish, Schedule, Revisions
+│   │           ├── media.py      # Presigned URL Cloudflare R2, Confirm Upload
+│   │           └── audit_logs.py # Jejak Audit Sistem
+│   ├── core/                     # Keamanan & Infrastruktur Inti
+│   │   ├── config.py             # Pydantic BaseSettings (.env loader dinamis)
+│   │   ├── security.py           # Argon2id password hashing & verifikasi
+│   │   ├── auth_cookie.py        # Penerbitan cookie __Host-himaif_session
+│   │   ├── sanitizer.py          # Rust nh3 HTML & URL allowlist sanitizer
+│   │   └── csrf_guard.py         # Subdomain eTLD+1 CSRF Guard
+│   ├── db/                       # Database Session & Seeding
+│   │   ├── session.py            # Async engine SQLAlchemy (asyncpg)
+│   │   ├── base.py               # Declarative Base
+│   │   └── seed.py               # Akun Super Admin & Kategori Default
+│   ├── models/                   # SQLAlchemy ORM Models
+│   │   ├── user.py               # Model User & UserRoleEnum
+│   │   ├── session.py            # Model Active Session
+│   │   ├── category.py           # Model BlogCategory
+│   │   ├── tag.py                # Model BlogTag & BlogPostTag
+│   │   ├── post.py               # Model BlogPost (content_json, content_html)
+│   │   ├── revision.py           # Model BlogPostRevision
+│   │   ├── media.py              # Model MediaAsset
+│   │   └── audit_log.py          # Model AuthAuditLog
+│   ├── schemas/                  # Pydantic v2 DTOs (Request / Response validation)
 │   │   ├── auth.py
-│   │   ├── blog.py
-│   │   ├── form.py
-│   │   ├── submission.py
-│   │   ├── interview.py
-│   │   └── evaluation.py
-│   │
-│   ├── services/                 # Business logic layer terisolasi
-│   │   ├── auth_service.py       # Logika kredensial, rotasi refresh token, ganti password
-│   │   ├── blog_service.py       # Logika penerbitan, revisioning, dan sanitasi nh3
-│   │   ├── image_optimizer.py    # Logika konversi WebP/AVIF via Pillow & anti-decompression bomb
-│   │   ├── form_engine.py        # Validasi dinamis isian formulir terhadap skema
-│   │   ├── slot_booking.py       # Global lock ordering (ORDER BY id ASC FOR UPDATE)
-│   │   └── export_service.py     # Pembangkitan file spreadsheet Excel/CSV tanpa PIN
-│   │
-│   ├── tasks/                    # Task asinkron background (Celery Worker)
-│   │   ├── celery_app.py         # Inisialisasi Celery worker & koneksi Redis broker
-│   │   ├── blog_scheduler.py     # Eksekusi rutin artikel terjadwal (Celery Beat)
-│   │   ├── image_worker.py       # Pemrosesan varian gambar asinkron
-│   │   └── cleanup_tasks.py      # Retensi berkas orphan (24 jam) & retensi data pelamar
-│   │
-│   └── cli.py                    # Tool CLI administratif server (darurat reset Super Admin)
-│
-├── tests/                        # Automated unit & integration testing
-│   ├── conftest.py               # Fixtures database test & client mock
-│   ├── test_auth.py              # Uji coba login pseudo-email, Argon2id, & RBAC
-│   ├── test_blog.py              # Uji coba CRUD blog, SEO scoring, Version Tag invalidation
-│   ├── test_slot_concurrency.py  # Uji coba k6/Locust konkurensi booking & anti-deadlock
-│   └── test_reschedule.py        # Uji coba reschedule publik H-1 cut-off
-├── alembic.ini
-├── pyproject.toml / requirements.txt
-└── main.py                       # ASGI entrypoint aplikasi FastAPI
+│   │   ├── user.py
+│   │   ├── category.py
+│   │   ├── post.py
+│   │   └── media.py
+│   └── services/                 # Domain Logic Services
+│       ├── post_service.py       # Logika publikasi, kalkulasi read time, tag sync
+│       ├── storage_service.py    # Generator S3 SigV4 Presigned URL ke R2
+│       └── session_service.py    # Redis cache get/set/invalidate sesi aktif
+├── tests/                        # Unit & Integration Tests (Pytest)
+├── Dockerfile                    # Multi-stage production container
+├── requirements.txt              # Dependensi Python terkunci
+└── main.py                       # FastAPI ASGI Entrypoint
 ```
 
 ---
 
-## 4. Konfigurasi Lingkungan (`.env.example`)
+## 4. Orkestrasi Docker Compose (`/docker`)
 
-```ini
-# ==========================================
-# KONFIGURASI GLOBAL & ENVIRONMENT
-# ==========================================
-ENVIRONMENT=production
-PROJECT_NAME="HIMA IF Telkom University CMS"
-API_V1_PREFIX=/api/v1
-CORS_ALLOWED_ORIGINS=https://himaif.id
+### 4.1 Spesifikasi Layanan (`docker-compose.prod.yml`)
 
-# ==========================================
-# ASYMMETRIC JWT (ES256) KEYPATHS
-# ==========================================
-JWT_ALGORITHM=ES256
-JWT_PRIVATE_KEY_PATH=/etc/secrets/jwt_es256_private.pem
-JWT_PUBLIC_KEY_PATH=/etc/secrets/jwt_es256_public.pem
-ACCESS_TOKEN_EXPIRE_MINUTES=15
-REFRESH_TOKEN_EXPIRE_DAYS=7
+Sistem terdiri dari **5 container ramping** yang mengonsumsi RAM total < 1 GB:
 
-# ==========================================
-# ENKRIPSI DATA PELAMAR (AES-256-GCM / Fernet)
-# ==========================================
-APPLICANT_PIN_ENCRYPTION_KEY=dGhpc19pc19hXzMyX2J5dGVfc2VjcmV0X2tleV9mb3JfYWVzIQ==
-APPLICANT_PIN_KEY_VERSION=v1
+```yaml
+version: "3.8"
 
-# ==========================================
-# BOT PROTECTION (CLOUDFLARE TURNSTILE)
-# ==========================================
-NEXT_PUBLIC_TURNSTILE_SITE_KEY=0x4AAAAAAABBBBBCCCCCDDDD
-TURNSTILE_SECRET_KEY=0x4AAAAAAABBBBBCCCCCDDDD_SECRET_KEY
+networks:
+  himaif-public:
+    driver: bridge
+  himaif-internal:
+    driver: bridge
 
-# ==========================================
-# POSTGRESQL DATABASE (DOCKER / CLOUD)
-# ==========================================
-POSTGRES_SERVER=postgres
-POSTGRES_PORT=5432
-POSTGRES_USER=himaif_user
-POSTGRES_PASSWORD=himaif_strong_password_2026
-POSTGRES_DB=himaif_cms_db
-DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_SERVER}:${POSTGRES_PORT}/${POSTGRES_DB}
+volumes:
+  postgres_data:
+  nginx_cache:
+  certbot_www:
+  certbot_conf:
 
-# ==========================================
-# SEGREGATED REDIS INSTANCES (3 SEPARATE INSTANCES)
-# ==========================================
-# Instance 1: Dedicated Response & Model Cache
-REDIS_CACHE_URL=redis://:redis_auth_cache_2026@redis-cache:6379/0
+services:
+  # 1. Reverse Proxy & Ingress
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: himaif_nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/nginx/conf.d:/etc/nginx/conf.d:ro
+      - nginx_cache:/var/cache/nginx
+      - certbot_www:/var/www/certbot:ro
+      - certbot_conf:/etc/letsencrypt:ro
+    networks:
+      - himaif-public
+      - himaif-internal
+    depends_on:
+      - frontend
+      - backend
 
-# Instance 2: Dedicated Celery Task Broker & Backend
-REDIS_CELERY_BROKER_URL=redis://:redis_auth_celery_2026@redis-celery:6379/0
+  # 2. Frontend Next.js 15
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: ../docker/Dockerfile.frontend
+    container_name: himaif_frontend
+    restart: unless-stopped
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+      - INTERNAL_BACKEND_URL=http://backend:8000/api/v1
+    networks:
+      - himaif-internal
+    deploy:
+      resources:
+        limits: { cpus: "1.00", memory: "512M" }
+        reservations: { cpus: "0.20", memory: "128M" }
 
-# Instance 3: Active Session, Token JTI, Rate Limiting & Advisory Locks
-REDIS_SESSION_URL=redis://:redis_auth_session_2026@redis-session:6379/0
+  # 3. Backend FastAPI
+  backend:
+    build:
+      context: ./backend
+      dockerfile: ../docker/Dockerfile.backend
+    container_name: himaif_backend
+    restart: unless-stopped
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips="*" --workers 2
+    env_file: .env.production
+    networks:
+      - himaif-internal
+    depends_on:
+      - postgres
+      - redis
+    deploy:
+      resources:
+        limits: { cpus: "1.00", memory: "384M" }
+        reservations: { cpus: "0.20", memory: "128M" }
 
-# ==========================================
-# S3-COMPATIBLE OBJECT STORAGE (PRODUK: BELUM DIPUTUSKAN)
-# ==========================================
-STORAGE_PROVIDER=s3-compatible
-STORAGE_ENDPOINT=http://storage-service:9000
-STORAGE_ACCESS_KEY=storage_admin_user
-STORAGE_SECRET_KEY=storage_super_secure_key_2026
-STORAGE_PUBLIC_BUCKET=himaif-public-assets
-STORAGE_VAULT_BUCKET=himaif-protected-vault
-STORAGE_PUBLIC_BASE_URL=https://himaif.id/storage/public
+  # 4. PostgreSQL 16
+  postgres:
+    image: postgres:16-alpine
+    container_name: himaif_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - himaif-internal
+    deploy:
+      resources:
+        limits: { cpus: "1.00", memory: "512M" }
+        reservations: { cpus: "0.20", memory: "256M" }
 
-# ==========================================
-# SUPER ADMIN INITIAL SEED CREDENTIALS
-# ==========================================
-SUPER_ADMIN_IDENTIFIER=admin@informasite.himaif
-SUPER_ADMIN_INITIAL_PASSWORD=InformatikaJaya2026!
+  # 5. Redis Cache & Session
+  redis:
+    image: redis:7-alpine
+    container_name: himaif_redis
+    restart: unless-stopped
+    command: redis-server --requirepass ${REDIS_PASSWORD} --maxmemory 200mb --maxmemory-policy allkeys-lru
+    networks:
+      - himaif-internal
+    deploy:
+      resources:
+        limits: { cpus: "0.25", memory: "200M" }
+        reservations: { cpus: "0.05", memory: "64M" }
 ```
+
+Struktur proyek ini menjamin keteraturan kode, kecepatan pengembangan, dan kemudahan deployment bertahap di berbagai jenis server VPS.

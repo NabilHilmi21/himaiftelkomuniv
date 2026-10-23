@@ -1,165 +1,119 @@
-# Rencana Implementasi Bertahap (Implementation Roadmap) — HIMA IF CMS
+# Rencana Implementasi Bertahap (Sprint Roadmap 1 Bulan) — HIMA IF CMS
 
 | Field | Detail |
 |---|---|
-| **System** | HIMA IF CMS |
-| **Document Version** | 1.1.0 |
-| **Date** | 14 October 2026 |
+| **System** | HIMA IF CMS (Modern WordPress-like Blog Engine) |
+| **Document Version** | 2.0.0 |
+| **Date** | 2026-10-23 |
 | **Status** | Approved Specification |
-| **Target Delivery** | 6 Fase Bertahap (Sprint-Based Rollout) |
-| **Methodology** | Agile Incremental Implementation + Quality Gates |
+| **Target Delivery** | 4 Sprint Mingguan (Total 1 Bulan Rilis Produksi) |
+| **Methodology** | Agile Incremental Delivery + Strict Quality Gates |
 
 ---
 
 ## Riwayat Revisi (Revision History)
 
-| Versi | Tanggal | Penulis | Ringkasan Perubahan | Alasan |
-|---|---|---|---|---|
-| 1.0.0 | 13 Oktober 2026 | Staff Ahli Divisi MIK (Proker Informasite) | Draf awal roadmap implementasi bertahap. | Inisiasi perencanaan fase pengembangan. |
-| 1.1.0 | 14 Oktober 2026 | Staff Ahli Divisi MIK & Antigravity Auditor | Pembaruan deliverables tiap fase: integrasi 3 instance Redis, ES256 & Argon2id pada Fase 1; pustaka `nh3` & Version Tag Invalidation pada Fase 2; Turnstile & booking multi-slot pada Fase 3; anti-deadlock locking & reschedule H-1 pada Fase 4; evaluasi berbasis `booking_id` & Redis Lua lock pada Fase 5; serta formalisasi ekspor RESTful & audit log pada Fase 6. | Penyelarasan tahapan implementasi dengan hasil audit arsitektur teknis v2.0.0. |
+| Versi | Tanggal | Penulis / Reviewer | Bagian yang Diubah | Rincian Perubahan (Sebelum vs Sesudah) | Alasan Perubahan |
+|---|---|---|---|---|---|
+| 1.0.0 | 2026-10-13 | Staff Ahli Divisi MIK | Dokumen Baru | Draf awal roadmap implementasi 6 fase bertahap. | Inisiasi perencanaan fase pengembangan. |
+| 1.1.0 | 14 Oktober 2026 | Staff Ahli MIK & Auditor | Revisi Deliverables | Integrasi 3 Redis, ES256, Turnstile, booking multi-slot, evaluasi per booking_id. | Penyelarasan hasil audit teknis v2.0.0. |
+| 1.2.0 | 14 Oktober 2026 | Staff Ahli MIK & Implementer | Quality Gates Fase 1 | 7 Quality Gates Fase 1, penundaan storage, grace period refresh, UI placeholder. | Sinkronisasi keputusan implementasi. |
+| 1.3.0 | 14 Oktober 2026 | Staff Ahli MIK & Lead QA | Konsistensi Tabel | Standarisasi 12 tabel riil migrasi 003, Tailwind v3.4.x, kriteria pengujian Fase 2-6. | Harmonisasi lintas dokumen. |
+| 2.0.0 | 2026-10-23 | Staff Ahli MIK & Antigravity Lead | Seluruh Dokumen | **Sebelum:** Roadmap 6 fase bertahap untuk modul interview & rekrutmen massal.<br>**Sesudah:** Restrukturisasi total menjadi Roadmap Sprint 4 Minggu terukur (1 Bulan) murni Blog CMS modern sekelas WordPress, adopsi TipTap WYSIWYG, integrasi Cloudflare R2, eliminasi Celery, dan quality gates mingguan yang realistis diselesaikan mahasiswa. | Pivot arsitektur WordPress-like Blog CMS, eliminasi modul interview, dan kepastian rilis tepat waktu. |
 
 ---
 
-## 1. Work Breakdown Structure & Matriks Prioritas
-
-Fitur-fitur sistem dikelompokkan ke dalam tiga tingkat prioritas:
-- **P0 (Critical / Blocker)**: Fondasi arsitektur, 3 instance Redis, autentikasi pseudo-email (Argon2id + ES256), skema database v2.0.0, dynamic form builder, Turnstile bot protection, booking multi-slot dengan global anti-deadlock lock ordering, dan blog editor inti dengan sanitasi `nh3`.
-- **P1 (Core Feature)**: Auto-provisioning akun divisi (`must_change_password`), live workspace interview berbasis `booking_id` dengan Redis Lua advisory lock, generator varian WebP/AVIF via Pillow, scheduled publishing dengan Version Tag $O(1)$, public reschedule H-1 cut-off, dan ekspor laporan RESTful (tanpa PIN).
-- **P2 (Enhancement & Polish)**: Real-time SEO scoring feedback, Lenis smooth scrolling, visual revision diff, cleanup task berkas orphan (24 jam), dan pencarian audit log filter.
-
----
-
-## 2. Peta Fase Implementasi (6 Fase Bertahap)
+## 1. Roadmap Sprint 4 Minggu (Target 1 Bulan Rilis)
 
 ```mermaid
 gantt
-    title Roadmap Pengembangan HIMA IF CMS
+    title Roadmap 4 Minggu Pengembangan HIMA IF Blog CMS
     dateFormat  YYYY-MM-DD
-    section Fase 1: Fondasi & Auth
-    Setup Repo, Docker (3x Redis), DB Schema :a1, 2026-10-15, 7d
-    Pseudo-Account Auth (Argon2id + ES256)   :a2, after a1, 7d
-    section Fase 2: Blog CMS
-    TipTap Block Editor, nh3 & Categories    :b1, after a2, 10d
-    Pillow Image Pipeline & Version Tag Cache:b2, after b1, 7d
-    section Fase 3: Dynamic Forms
-    Dynamic Form Builder Engine              :c1, after b2, 10d
-    Public Form Submit (Turnstile + 2 Slots) :c2, after c1, 7d
-    section Fase 4: Division & Interview
-    Division Mgmt & Auto-Account Gen         :d1, after c2, 7d
-    Slot Generator & Anti-Deadlock Booking   :d2, after d1, 7d
-    section Fase 5: Evaluasi Workspace
-    Custom Question Builder                  :e1, after d2, 6d
-    Split-Screen Workspace (booking_id)      :e2, after e1, 8d
-    section Fase 6: Sentralisasi & Polish
-    Centralized Dashboard & Reporting        :f1, after e2, 7d
-    Performance Tuning, SEO, Launch QA       :f2, after f1, 7d
+    section Minggu 1: Fondasi & Auth
+    Setup Monorepo Docker & DB 7 Tabel           :m1_1, 2026-10-26, 3d
+    Autentikasi Session Cookie (__Host-) & RBAC :m1_2, after m1_1, 4d
+    section Minggu 2: Editor & Media
+    Integrasi TipTap WYSIWYG & Toolbar Custom    :m2_1, after m1_2, 4d
+    Media Library, Cloudflare R2 Presigned URL   :m2_2, after m2_1, 3d
+    section Minggu 3: Blog Workflow & Publik
+    Post Lifecycle (Draft, Publish, Schedule)    :m3_1, after m2_2, 3d
+    Portal Publik (Home, Detail Blog, SEO, ISR)  :m3_2, after m3_1, 4d
+    section Minggu 4: Hardening & Launch
+    Pencarian Full-Text, Filter Tags & Polish    :m4_1, after m3_2, 3d
+    Deployment Staging Hostinger, UAT & Live     :m4_2, after m4_1, 4d
 ```
 
 ---
 
-### Fase 1: Fondasi Arsitektur, Infrastruktur & Autentikasi (Minggu 1 - 2)
-**Tujuan**: Menyiapkan containerization, 3 instance Redis terpisah, database PostgreSQL 16, skema tabel relasional v2.0.0, dan autentikasi asimetris ES256 dengan Argon2id.
+## 2. Rincian Deliverables per Sprint & Quality Gates
+
+### Sprint 1: Fondasi Arsitektur, Database & Autentikasi Sesi (Minggu 1)
+**Tujuan**: Menyiapkan containerization Docker Compose ramping, database PostgreSQL 16 (7 tabel murni blog), dan autentikasi sesi berbasis cookie Host-Only (`__Host-himaif_session`).
+
 - **Deliverables**:
-  1. Konfigurasi `docker-compose.yml` (PostgreSQL 16, 3x Redis terpisah untuk Cache/Broker/Session, S3-compatible storage, Nginx reverse proxy satu origin).
-  2. Inisialisasi skema database via Alembic (`users`, `auth_audit_logs`, `form_submissions`, dll.).
-  3. Implementasi backend FastAPI: endpoint `/auth/login` (Argon2id OWASP), `/auth/refresh` (cookie HttpOnly ES256 + reuse detection `jti`), `/auth/change-password`, dan guard `must_change_password`.
-  4. Script seeding data awal `app/db/seed.py` (akun `SUPER_ADMIN` dan kategori default).
-  5. Inisialisasi frontend Next.js 15 dengan Tailwind CSS, shadcn/ui, `src/middleware.ts` untuk UX routing, dan Zustand auth store murni in-memory.
-- **Quality Gate**:
-  - Test login sukses dan gagal dengan rate limiting sliding window (lockout setelah 5 kegagalan per 15 menit).
-  - Verifikasi token asimetris ES256 sukses di FastAPI dan Next.js.
-  - Sesi langsung terputus seketika saat `auth_epoch` dinaikkan atau password diubah.
+  1. Konfigurasi `docker-compose.yml` (PostgreSQL 16, 1 instance Redis 7, Nginx reverse proxy single-origin).
+  2. Migrasi database Alembic terurut:
+     - `001_auth_and_sessions.py` (`users`, `sessions`, `auth_audit_logs`)
+     - `002_blog_cms_and_media.py` (`blog_categories`, `blog_tags`, `blog_post_tags`, `media_assets`, `blog_posts`, `blog_post_revisions`).
+  3. Script seeder `app/db/seed.py`: Akun `SUPER_ADMIN` awal dengan flag `must_change_password=true` dan kategori default.
+  4. Backend endpoints: `/auth/login`, `/auth/logout`, `/auth/me`, `/auth/change-password`, guard `must_change_password`, dan rate limit login (5 req/menit via Redis).
+  5. Frontend Next.js 15: Setup Tailwind CSS v3.4.x, komponen shadcn/ui, `src/middleware.ts` untuk routing UX, dan halaman login interaktif.
+- **Quality Gate 1 (Kriteria Kelulusan Minggu 1)**:
+  - [ ] Migrasi database `alembic upgrade head` berjalan sukses tanpa error.
+  - [ ] Login mengembalikan respons cookie `__Host-himaif_session` dengan atribut `HttpOnly`, `Secure`, `SameSite=Lax`, dan tanpa atribut `Domain`.
+  - [ ] Password tersimpan dalam hash Argon2id (bukan bcrypt/plaintext).
+  - [ ] Pengguna baru tidak dapat mengakses endpoint artikel sebelum menyelesaikan `POST /auth/change-password`.
 
 ---
 
-### Fase 2: Modul Media & Blog CMS WordPress-Equivalent (Minggu 3 - 5)
-**Tujuan**: Menyediakan platform publikasi artikel berita resmi dengan block editor TipTap, sanitasi modern, dan caching $O(1)$.
+### Sprint 2: TipTap WYSIWYG Editor, Sanitasi Rust `nh3` & Media Library (Minggu 2)
+**Tujuan**: Membangun antarmuka penulisan visual sekelas WordPress Gutenberg dan pipeline upload gambar direct-to-storage ke Cloudflare R2.
+
 - **Deliverables**:
-  1. Integrasi **TipTap Rich Text Editor** dengan blok standar dan custom HTML sandboxing.
-  2. Implementasi sanitasi ganda (DOMPurify di frontend, `nh3` di backend FastAPI).
-  3. Sistem kategori blog (`blog_categories`) dan manajemen URL slug unik.
-  4. Pipeline kompresi gambar asinkron via Pillow (`Image.MAX_IMAGE_PIXELS = 16_777_216` anti-decompression bomb) menghasilkan WebP/AVIF dan LQIP base64.
-  5. Background worker Celery Beat untuk pengecekan berkala artikel terjadwal dengan **Version Tag Invalidation $O(1)$** (`INCR cms:blog:version:list`).
-  6. Sidebar evaluasi SEO real-time dengan feedback lampu indikator (Merah/Oranye/Hijau).
-- **Quality Gate**:
-  - Artikel terbit tampil di halaman publik dengan LCP < 1.5 detik.
-  - Mutasi artikel blog menginvalidasi cache list secara instan tanpa perintah scanning blocking di Redis.
+  1. Integrasi **TipTap Headless Editor** di Next.js: Toolbar formatting (Headings, Bold, Italic, Code Block, Table, Blockquote, Divider, Embed YouTube/Spotify).
+  2. Implementasi **Sanitasi Ganda Backend**: Pustaka Rust `nh3` menyaring tag, atribut, dan skema URL berbahaya dari HTML artikel sebelum disimpan ke database.
+  3. Larangan mutlak berkas `.svg` dan validasi signature biner (*magic bytes*) pada upload media.
+  4. Endpoint Presigned URL S3v4: `POST /api/v1/media/presign-upload` (kalkulasi HMAC-SHA256 in-memory) dan `POST /api/v1/media/confirm-upload`.
+  5. UI Media Library di Dashboard Admin: Galeri gambar, tombol salin link relatif, dan dialog penyisipan gambar ke editor.
+- **Quality Gate 2 (Kriteria Kelulusan Minggu 2)**:
+  - [ ] Injeksi payload XSS (`<script>alert(1)</script>`, `<img src=x onerror=alert(1)>`) terbukti dilucuti 100% oleh sanitizer `nh3` di backend.
+  - [ ] Upload berkas `.svg` atau file palsu (contoh: binary `.exe` diubah ekstensi `.jpg`) ditolak dengan kode `HTTP 422`.
+  - [ ] Upload gambar berhasil langsung ke Cloudflare R2 via Presigned URL tanpa melewati CPU/bandwidth server VPS.
+  - [ ] Gambar disisipkan ke editor menggunakan **Kontrak Path Relatif** (`/storage/public/{id}.webp`).
 
 ---
 
-### Fase 3: Dynamic Form Builder Engine & Ingestion (Minggu 6 - 7)
-**Tujuan**: Membangun form builder fleksibel yang mendukung pendaftaran multi-divisi dan proteksi bot Turnstile.
+### Sprint 3: Alur Siklus Artikel (Post Lifecycle) & Portal Publik (Minggu 3)
+**Tujuan**: Menyelesaikan alur penerbitan artikel (Draft, Publish Mandiri, Schedule) dan portal berita publik HIMA IF dengan kecepatan muat tinggi (LCP < 1.5s).
+
 - **Deliverables**:
-  1. Form Builder UI: Susun field custom tanpa batas (NIM, teks, esai, kontak, dropdown, radio).
-  2. Komponen upload berkas drag-and-drop dengan validasi magic bytes (PDF dan gambar).
-  3. Endpoint publik `/forms/{slug}/submit` dengan verifikasi token Cloudflare Turnstile *fail-closed*.
-  4. Aturan pemilihan divisi: jika pelamar memilih 2 divisi, sistem mewajibkan reservasi 2 slot wawancara terpisah yang anti-overlap.
-  5. Pembangkitan `submission_code` unik dan `tracking_pin` 6-digit terenkripsi AES-256-GCM / Fernet.
-  6. Task Celery Beat `cleanup_tasks.py` untuk menghapus berkas orphan setelah 24 jam.
-- **Quality Gate**:
-  - Submit massal pendaftar berhasil memvalidasi Turnstile dan menyimpan payload JSONB tanpa data corrupt.
-  - Berkas orphan tanpa submission dibersihkan otomatis dalam 24 jam.
+  1. CRUD Artikel di Backend: Endpoints `/posts/*` dengan perlindungan anti-IDOR (Author hanya boleh memutasi artikelnya sendiri).
+  2. **Alur Kerja Mandiri Author**: Endpoint `PATCH /posts/{id}/publish` dan `PATCH /posts/{id}/schedule` dapat dieksekusi langsung oleh Author pemilik artikel.
+  3. Penjadwalan Tayang Bebas Celery: Kueri publik otomatis menyajikan artikel `SCHEDULED` yang `published_at <= NOW()`.
+  4. Riwayat Revisi: Pencatatan snapshot perubahan artikel di tabel `blog_post_revisions`.
+  5. Portal Publik Next.js (SSR): Homepage HIMA IF, Arsip Berita (`/blog`), Halaman Detail Artikel (`/blog/[slug]`), dan Filter Kategori (`/categories/[slug]`).
+  6. Optimasi SEO: Dynamic `sitemap.xml`, `robots.txt`, OpenGraph image, dan kalkulasi otomatis estimasi waktu membaca (*Reading Time*).
+- **Quality Gate 3 (Kriteria Kelulusan Minggu 3)**:
+  - [ ] Uji otorisasi IDOR: Akun Author A mendapat respons `HTTP 403 Forbidden` saat mencoba mengedit atau menghapus artikel Author B.
+  - [ ] Artikel terjadwal otomatis tampil di portal publik saat waktu jam tayang terlampaui tanpa perlu restart server atau cron Celery.
+  - [ ] Audit Google Lighthouse pada halaman detail artikel publik meraih skor Performance $\ge 90$ dan SEO = 100.
+  - [ ] Nginx proxy cache SSD lokal `/storage/public/*` menghasilkan header `X-Cache-Status: HIT` pada pemuatan gambar berulang (< 10 ms).
 
 ---
 
-### Fase 4: Manajemen Divisi & Penjadwalan Wawancara (Minggu 8 - 9)
-**Tujuan**: Menghubungkan formulir dengan divisi kepanitiaan dan alokasi waktu wawancara atomik anti-deadlock.
+### Sprint 4: Pencarian Full-Text, Hardening Keamanan, Deployment & UAT (Minggu 4)
+**Tujuan**: Menambahkan fitur pencarian cerdas, menyelesaikan pengujian penerimaan pengguna (UAT), dan deployment produksi di VPS Hostinger (Staging).
+
 - **Deliverables**:
-  1. Fitur tambah divisi custom + auto-provisioning akun login `...@divisi.namakepanitiaan` dengan `must_change_password = true`.
-  2. Generator slot interview per divisi dengan dukungan konfigurasi `active_days` (mengabaikan akhir pekan).
-  3. Pemblokiran slot (`is_blocked`) oleh akun divisi dengan validasi kepemilikan.
-  4. Implementasi transaksi database pemesanan slot multi-divisi menggunakan **Global Anti-Deadlock Locking** (`SELECT ... FROM interview_slots WHERE id IN (...) ORDER BY id ASC FOR UPDATE`).
-  5. Fitur reschedule mandiri publik di `/status` dengan batas cut-off H-1 (24 jam) dan Turnstile.
-  6. Dokumentasi prosedur operasional pengingat manual WhatsApp H-30 menit oleh panitia.
-- **Quality Gate**:
-  - Load test k6 / Locust: 100 request concurrent pada slot kapasitas 1 tidak pernah memicu deadlock PostgreSQL dan hanya menghasilkan 1 booking sah (99 request ditolak dengan pesan informatif 409 Conflict).
+  1. Pencarian Full-Text PostgreSQL: Indeks GIN pada kolom `title` dan `excerpt` menggunakan konfigurasi teks bahasa Indonesia.
+  2. Hardening Ingress & Security Headers: `X-Frame-Options: SAMEORIGIN`, `X-Content-Type-Options: nosniff`, `Content-Security-Policy`.
+  3. Mitigasi Sibling Subdomain CSRF: Middleware validasi `Sec-Fetch-Site: same-origin` dan header `X-Requested-With`.
+  4. Pengujian Penerimaan Pengguna (UAT) bersama pengurus Divisi Media Informasi & Kreatif (MIK).
+  5. Eksekusi deployment produksi Tahap 1 di VPS Hostinger (`himaif.my.id`) menggunakan SSL Certbot otomatis.
+- **Quality Gate 4 (Kriteria Kelulusan Minggu 4)**:
+  - [ ] Fitur pencarian artikel berfungsi instan (< 50 ms) untuk kata kunci judul dan isi.
+  - [ ] Sistem lolos audit keamanan automated test: zero critical/high vulnerabilities.
+  - [ ] Pengurus MIK berhasil melakukan alur: Login $\to$ Tulis Artikel $\to$ Upload Gambar R2 $\to$ Terbitkan Mandiri $\to$ Artikel tampil di domain publik.
+  - [ ] Seluruh konfigurasi `.env` dan script transfer database disiapkan untuk transisi mulus ke VPS Kampus Telkom University di masa mendatang.
 
----
-
-### Fase 5: Instrumen Pertanyaan Custom & Workspace Interview (Minggu 10 - 11)
-**Tujuan**: Memberikan fasilitas penilaian terstruktur per booking dengan kontrol konkurensi antar pewawancara.
-- **Deliverables**:
-  1. Question Builder per divisi: butir pertanyaan fleksibel (esai, pilihan, skala nilai dengan panduan rubrik).
-  2. Isolasi data pendaftar: akun divisi dapat mengakses pendaftar yang memilih divisinya sebagai Pilihan 1 atau Pilihan 2.
-  3. **Split-Screen Interview Workspace berbasis `{booking_id}`**: profil & CV pendaftar di sisi kiri, lembar input nilai di sisi kanan.
-  4. Kontrol konkurensi workspace: Redis Advisory Lock (`interview:lock:{booking_id}`) dengan heartbeat Lua 30s + Database Optimistic Locking (`version` pada `interview_bookings`).
-  5. Fitur auto-save draft penilaian dan tombol kunci nilai final (*Finalize Evaluation*).
-- **Quality Gate**:
-  - Akun divisi A tidak dapat mengakses lembar evaluasi booking milik divisi B (IDOR testing lolos).
-  - Dua tab browser yang membuka workspace booking yang sama terlindungi dari insiden penimpaan nilai.
-
----
-
-### Fase 6: Sentralisasi Master Formulir, Super Admin Suite & Polish (Minggu 12 - 13)
-**Tujuan**: Dashboard konsolidasi pimpinan, ekspor data RESTful, kontrol PIN pelamar, dan pengujian pra-rilis.
-- **Deliverables**:
-  1. **Dashboard Master Formulir**: monitoring progres seluruh divisi, rekapitulasi nilai, dan rapat pleno penetapan kelulusan.
-  2. **Dashboard Super Admin**: kontrol global formulir, blog, manajemen akun, audit log viewer, dan ekspor sistem.
-  3. Fitur lihat dan reset PIN pelamar di portal admin (hanya `SUPER_ADMIN` dan `FORM_MASTER` scoped) disertai audit logging ketat.
-  4. Endpoint ekspor RESTful: `GET /analytics/forms/{form_id}/submissions/export?format=xlsx|csv` (tanpa menyertakan `tracking_pin` pelamar, tercatat di audit log).
-  5. Integrasi Lenis smooth scrolling dan optimasi font lokal `next/font`.
-  6. Security hardening, verifikasi reverse proxy headers (`--proxy-headers --forwarded-allow-ips`), dan pengujian E2E Playwright.
-- **Quality Gate**:
-  - Skor Lighthouse Performance >= 95, Accessibility >= 95, SEO = 100.
-  - PIN pelamar tidak pernah bocor ke staf divisi, daftar list, atau file ekspor spreadsheet.
-
----
-
-## 3. Diagram Ketergantungan Fitur (Dependency Graph)
-
-```mermaid
-flowchart TD
-    Fase1["Fase 1: Docker (3x Redis), DB Schema v2.0.0 & Auth ES256"] --> Fase2["Fase 2: Blog CMS (nh3) & Image Optimizer (Pillow)"]
-    Fase1 --> Fase3["Fase 3: Dynamic Form Builder (Turnstile + AES PIN)"]
-    
-    Fase3 --> Fase4A["Fase 4: Custom Divisions & Auto-Accounts"]
-    Fase3 --> Fase4B["Fase 4: Interview Slot Generator & Anti-Deadlock Booking"]
-    
-    Fase4A --> Fase5A["Fase 5: Custom Question Builder"]
-    Fase4B --> Fase5B["Fase 5: Split-Screen Workspace (booking_id + Redis Lock)"]
-    Fase5A --> Fase5B
-    
-    Fase2 --> Fase6["Fase 6: Centralized Dashboards, RESTful Exports & Polish"]
-    Fase4A --> Fase6
-    Fase5B --> Fase6
-```
+Roadmap ini realistis, terukur, dan memprioritaskan deliverable fungsional mingguan tanpa overengineering.

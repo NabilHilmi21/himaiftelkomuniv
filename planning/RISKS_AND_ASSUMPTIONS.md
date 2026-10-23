@@ -2,9 +2,9 @@
 
 | Field | Detail |
 |---|---|
-| **System** | HIMA IF CMS |
-| **Document Version** | 1.1.0 |
-| **Date** | 14 October 2026 |
+| **System** | HIMA IF CMS (Modern WordPress-like Blog Engine) |
+| **Document Version** | 2.0.0 |
+| **Date** | 2026-10-23 |
 | **Status** | Approved Specification |
 | **Review Cycle** | Tahunan (Menjelang Regenerasi Pengurus HIMA IF) |
 
@@ -12,86 +12,56 @@
 
 ## Riwayat Revisi (Revision History)
 
-| Versi | Tanggal | Penulis | Ringkasan Perubahan | Alasan |
-|---|---|---|---|---|
-| 1.0.0 | 13 Oktober 2026 | Staff Ahli Divisi MIK (Proker Informasite) | Draf awal analisis risiko dan asumsi teknis. | Inisiasi identifikasi risiko dan asumsi baseline. |
-| 1.1.0 | 14 Oktober 2026 | Staff Ahli Divisi MIK & Antigravity Auditor | Pembaruan asumsi wajib booking 2 slot untuk 2 divisi, penambahan asumsi pengingat manual WhatsApp H-30 menit, integrasi batas H-1 reschedule mandiri, mitigasi dekompresi bom Pillow, pembaruan sanitasi HTML ke `nh3`, mitigasi IP spoofing di balik reverse proxy, penambahan risiko slot thrashing & impersonasi PIN, serta formalisasi kebijakan retensi data orphan dan penandaan status retensi pelamar (`BELUM DIPUTUSKAN`). | Penyelarasan mitigasi risiko dengan hasil audit keamanan dan keputusan arsitektur v2.0.0. |
+| Versi | Tanggal | Penulis / Reviewer | Bagian yang Diubah | Rincian Perubahan (Sebelum vs Sesudah) | Alasan Perubahan |
+|---|---|---|---|---|---|
+| 1.0.0 | 2026-10-13 | Staff Ahli Divisi MIK | Dokumen Baru | Draf awal analisis risiko dan asumsi teknis sistem dual-engine. | Inisiasi identifikasi risiko baseline. |
+| 1.1.0 | 14 Oktober 2026 | Staff Ahli MIK & Auditor | Concurrency & XSS | Asumsi booking 2 slot, mitigasi bom Pillow, sanitasi nh3, mitigasi IP spoofing. | Penyelarasan audit keamanan v2.0.0. |
+| 1.2.0 | 14 Oktober 2026 | Staff Ahli MIK & Auditor | Kepatuhan UU PDP | Penetapan retensi data pelamar, jadwal Celery Beat, eliminasi BELUM DIPUTUSKAN. | Kepatuhan regulasi UU PDP No. 27/2022. |
+| 2.0.0 | 2026-10-23 | Staff Ahli MIK & Antigravity Lead | Seluruh Dokumen | **Sebelum:** Asumsi modul formulir dinamis, jadwal wawancara, PIN pelamar, dan retensi data pelamar.<br>**Sesudah:** Eliminasi seluruh risiko modul interview; fokuskan asumsi pada arsitektur murni Blog CMS, alur mandiri Author, penyimpanan Cloudflare R2, dan mitigasi risiko migrasi bertahap (Hostinger $\to$ VPS Kampus Tel-U), risiko Stored XSS TipTap via Rust `nh3`, larangan SVG, dan keamanan cookie `__Host-`. | Penyesuaian pivot WordPress-like Blog CMS dan penyelarasan strategi deployment bertahap. |
 
 ---
 
 ## 1. Log Asumsi Desain (Design Assumptions)
 
-Dalam merancang spesifikasi teknis HIMA IF CMS, kebutuhan operasional yang telah disepakati ditetapkan sebagai asumsi rekayasa perangkat lunak terverifikasi:
+Dalam merancang spesifikasi teknis HIMA IF CMS yang baru, kebutuhan operasional ditetapkan sebagai asumsi rekayasa perangkat lunak terverifikasi:
 
-### Asumsi 1: Format Identitas Pseudo-Account & Ketiadaan Mail Server
-- Format email (`admin@informasite.himaif`, `admin@namakepanitiaan.himaif`, `...@divisi.namakepanitiaan`) berfungsi murni sebagai **Structured Login Identifier / Username internal**, bukan mailbox nyata.
-- Sistem tidak memerlukan mail server (SMTP), DNS MX record, atau layanan email pihak ketiga.
-- Validasi input di frontend dan backend menggunakan custom regex terisolasi yang mengizinkan format domain internal `.himaif` tanpa dependensi IANA TLD.
-- Pembagian kredensial akun awal dilakukan secara langsung oleh pembuat akun (Super Admin atau Master Formulir).
+### Asumsi 1: Fokus Murni Platform Publikasi Blog (WordPress-Equivalent)
+- Sistem berpusat 100% pada penerbitan berita, dokumentasi kegiatan, opini mahasiswa, dan profil kelembagaan HIMA IF.
+- Seluruh kebutuhan formulir rekrutmen dinamis dan booking jadwal wawancara ditiadakan, merampingkan kompleksitas sistem sebesar ~70%.
 
-### Asumsi 2: Kredensial Pendaftar Publik & Proteksi PIN 6-Digit
-- Mahasiswa pendaftar publik tidak memiliki akun pada tabel `users`.
-- Saat submit berhasil, pendaftar menerima **Kode Registrasi Unik** (misal: `REG-PEMILU-88219`) dan **PIN Keamanan 6-Digit** acak via CSPRNG.
-- PIN disimpan secara terenkripsi di level aplikasi menggunakan **AES-256-GCM / Fernet** dengan format `{key_version}:{ciphertext}`.
-- PIN hanya dapat dilihat dan di-reset oleh **SUPER_ADMIN** dan **FORM_MASTER** (khusus formulir miliknya). Akun `DIVISION_STAFF` **dilarang keras** melihat atau mereset PIN.
-- Setiap aksi melihat PIN dicatat ke `auth_audit_logs` dengan event `VIEW_APPLICANT_PIN`, dan reset PIN dicatat dengan `RESET_APPLICANT_PIN`.
+### Asumsi 2: Dua Peran dengan Alur Kerja Mandiri (*Direct Publishing Workflow*)
+- Sistem hanya menggunakan 2 peran pengguna: `SUPER_ADMIN` dan `AUTHOR`.
+- Untuk mencegah bottleneck editorial, peran `AUTHOR` diizinkan mempublikasikan langsung (`PUBLISHED`) dan menjadwalkan (`SCHEDULED`) artikel buatannya sendiri tanpa menunggu antrean approval admin.
 
-### Asumsi 3: Pendaftar Multi-Divisi Wajib Memesan Dua Slot Wawancara
-- Jika pendaftar memilih dua divisi (`primary_division_id` dan `secondary_division_id`), maka pendaftar **wajib memesan dua slot wawancara terpisah** pada saat pengisian formulir.
-- Kedua slot harus berasal dari masing-masing divisi terkait dan rentang waktunya tidak boleh saling bertabrakan (*anti-overlap*).
-- Sistem memproses reservasi kedua slot secara atomik all-or-nothing menggunakan transaksi database dengan urutan penguncian global anti-deadlock (`ORDER BY id ASC FOR UPDATE`).
+### Asumsi 3: Nol BaaS (*Self-Hosted Baseline*)
+- Seluruh data relasional, autentikasi, dan riwayat revisi dikelola mandiri di dalam container PostgreSQL 16 di server VPS organisasi, tanpa ketergantungan pada vendor BaaS (Supabase, Firebase, PocketBase).
 
-### Asumsi 4: Konkurensi Pewawancara Divisi (Advisory Lock + Optimistic Locking)
-- Akun divisi (`...@divisi.namakepanitiaan`) dapat digunakan secara bersamaan oleh tim pewawancara pada beberapa komputer browser.
-- Untuk mencegah bentrokan data:
-  1. Lembar kerja wawancara dilindungi **Redis Advisory Lock** (`interview:lock:{booking_id}`) dengan heartbeat 30 detik via script Lua atomik untuk memberikan penanda visual penilai aktif.
-  2. Database menerapkan **Optimistic Locking** melalui kolom `version` pada tabel `interview_bookings`. Jika dua penilai mencoba menyimpan bersamaan, transaksi kedua ditolak dengan HTTP 409 `RESOURCE_CONFLICT`.
+### Asumsi 4: Sentralisasi Media di Cloudflare R2 & Cache SSD Nginx
+- Berkas gambar artikel tidak disimpan di filesystem harddisk lokal VPS, melainkan di Cloudflare R2 (S3-compatible, 0 biaya egress).
+- Nginx reverse proxy di VPS bertindak sebagai caching proxy lokal sebesar 5 GB SSD (`/storage/public/*`), menyajikan gambar dengan latensi < 10 ms bagi pengunjung blog.
 
-### Asumsi 5: Batasan Akses Modul Blog
-- Modul Blog CMS adalah representasi resmi HIMA IF secara kelembagaan, sehingga pengelolaan artikel blog (CRUD, penjadwalan, SEO, dan publikasi) dibatasi **eksklusif untuk SUPER_ADMIN**.
-- Master Formulir dan Akun Divisi tidak memiliki akses ke modul Blog.
+### Asumsi 5: Strategi Peluncuran Bertahap (*Staged Rollout*)
+- Tahap 1: Deployment awal di VPS Hostinger menggunakan domain sementara (`himaif.my.id`) agar publikasi dapat berjalan segera tanpa menunggu birokrasi DTI kampus.
+- Tahap 2: Migrasi ke VPS Kampus Telkom University dengan subdomain resmi (`himaif.telkomuniversity.ac.id`) setelah alokasi server dan DNS DTI selesai.
+- VPS Hostinger dialihkan menjadi Nginx 301 Permanent Redirector untuk mengamankan link medsos dan reputasi SEO Google.
 
-### Asumsi 6: Integritas Struktur Field Formulir yang Telah Berjalan
-- Field formulir dinamis yang telah memiliki data isian pendaftar **dilarang dihapus permanen (*hard delete*)**.
-- Sistem hanya mengizinkan pengarsipan field (*soft-delete/hide*), menjaga integritas relasional data historis pendaftar terdahulu (*zero data corruption*).
-
-### Asumsi 7: Operasional Pengingat Jadwal (WhatsApp Manual H-30 Menit)
-- Mengingat ketiadaan SMTP mail server, mahasiswa pendaftar wajib secara proaktif memeriksa jadwal dan status seleksinya melalui portal `/status`.
-- Sebagai prosedur operasional organisasi, panitia divisi akan mengingatkan peserta secara manual melalui **WhatsApp pada H-30 menit** sebelum sesi wawancara dimulai (mengirimkan informasi ruangan fisik / link Google Meet).
-
-### Asumsi 8: Reschedule Mandiri Publik
-- Pendaftar diperbolehkan mengubah jadwal wawancaranya secara mandiri tanpa batas jumlah kali, asalkan dilakukan paling lambat **H-1 (24 jam sebelum waktu sesi saat ini)**.
-- Setiap request reschedule wajib memvalidasi token **Cloudflare Turnstile** dan dilindungi rate limiter ketat.
+### Asumsi 6: Kontrak Path Relatif pada Konten TipTap
+- Seluruh gambar di dalam dokumen TipTap wajib disimpan menggunakan relative path (`/storage/public/{id}.webp`), bukan absolute URL.
+- Menjamin artikel historis bebas broken image dan bebas error CORS saat domain berganti.
 
 ---
 
 ## 2. Matriks Analisis Risiko Teknis & Mitigasi
 
-| # | Skenario Risiko | Tingkat Risiko | Dampak Operasional | Strategi Mitigasi Terpilih |
-|---|---|:---:|---|---|
-| **R-01** | **Race Condition & Deadlock Pemesanan Slot Multi-Divisi**<br>Banyak pelamar memesan slot bersilangan secara bersamaan. | **Kritis (Critical)** | Deadlock database, kegagalan pemesanan massal, atau *overbooking*. | Terapkan urutan penguncian global anti-deadlock: kunci slot dengan `SELECT ... FROM interview_slots WHERE id IN (...) ORDER BY id ASC FOR UPDATE`, lalu eksekusi validasi kapasitas dan update secara atomik. |
-| **R-02** | **Insecure Direct Object References (IDOR) Antar Divisi**<br>Akun Divisi memanipulasi parameter URL untuk mengakses pendaftar atau evaluasi divisi lain. | **Kritis (Critical)** | Kebocoran data pribadi (PII) dan nilai rahasia pendaftar. | Terapkan dependency guard di FastAPI (`verify_submission_access` dan `verify_booking_evaluator`) yang memvalidasi `current_user.division_id` terhadap `primary_division_id`, `secondary_division_id`, atau relasi kepemilikan booking. |
-| **R-03** | **Lupa Password Akun Tanpa Mail Server**<br>Koordinator divisi atau ketua panitia lupa kredensial login. | **Sedang (Medium)** | Akses terhenti, proses seleksi wawancara tertunda. | Terapkan delegasi hierarkis: Master Formulir mereset akun divisi, Super Admin mereset Master Formulir. Disediakan CLI darurat server: `python -m app.cli reset-superadmin`. |
-| **R-04** | **Pembengkakan Penyimpanan (Storage Bloat) & Berkas Orphan**<br>Ratusan pendaftar mengunggah berkas besar atau mengunggah berkas tanpa menyelesaikan form. | **Tinggi (High)** | Disk server penuh, biaya penyimpanan melonjak. | 1. Batasi ukuran berkas 5–10 MB di Nginx & backend.<br>2. Pipeline kompresi Pillow ke WebP/AVIF.<br>3. Task Celery otomatis menghapus berkas orphan setelah 24 jam jika tidak direferensikan oleh submisi aktif. |
-| **R-05** | **Stored XSS via Blok Custom HTML di Blog**<br>Penyisipan tag script atau event handler jahat pada block editor. | **Kritis (Critical)** | Pengambilalihan sesi akun admin atau defacement website. | Sanitasi ganda: sanitasi client-side menggunakan `DOMPurify` dan sanitasi server-side menggunakan library Rust modern `nh3` (menggantikan `bleach` yang telah deprecated) dengan whitelist tag ketat. |
-| **R-06** | **Decompression Bomb & Pixel Flood Attack**<br>Pengunggahan gambar berdimensi raksasa berukuran byte kecil. | **Kritis (Critical)** | Crash server backend akibat lonjakan alokasi RAM (OOM Killer). | 1. Konfigurasi `Image.MAX_IMAGE_PIXELS = 16_777_216`.<br>2. Eskalasi `DecompressionBombWarning` menjadi error fatal.<br>3. Validasi dimensi header (`img.size`) sebelum melakukan dekompresi bitmap penuh ke RAM. |
-| **R-07** | **Brute-force Login & Enumerasi PIN Pendaftar**<br>Penyerang menebak password internal atau PIN 6-digit pendaftar di portal publik. | **Tinggi (High)** | Akun admin dibajak atau jadwal wawancara mahasiswa diutak-atik. | 1. Rate limiting bertingkat via Redis (5 kegagalan per 15 menit, disusul lockout bertahap).<br>2. Evaluasi kredensial pendaftar dengan `secrets.compare_digest` (*constant-time*).<br>3. Respons error identik untuk mencegah enumerasi NIM/kode. |
-| **R-08** | **Slot Thrashing via Reschedule Publik Tanpa Batas**<br>Bot atau pelamar memindahkan jadwal berulang kali untuk memonopoli slot. | **Tinggi (High)** | Slot kosong palsu, ketidakpastian jadwal pewawancara. | 1. Cut-off waktu ketat H-1 (24 jam sebelum sesi).<br>2. Proteksi Cloudflare Turnstile *fail-closed* pada setiap request reschedule.<br>3. Rate limit per NIM dan per IP. |
-| **R-09** | **Pemalsuan Header IP (IP Spoofing) di Balik Proxy**<br>Penyerang memanipulasi header `X-Forwarded-For` untuk membypass rate limit. | **Tinggi (High)** | Rate limiter tidak berfungsi, server rentan terhadap DoS. | FastAPI dijalankan dengan flag `--proxy-headers` dan `--forwarded-allow-ips` yang dikonfigurasi secara eksplisit hanya mempercayai IP container Nginx proxy satu origin. |
-| **R-10** | **CPU Blocking Akibat Invalidation Cache Berbasis Pattern**<br>Penggunaan perintah `KEYS` atau `SCAN` memblokir Redis event loop. | **Tinggi (High)** | Latensi API melonjak drastis, request timeout massal. | Hapus perintah `SCAN`+`DEL`. Terapkan **Version Tag Invalidation $O(1)$** (`INCR cms:blog:version:list`). |
+| ID | Kategori | Skenario Risiko | Dampak (*Impact*) | Tingkat | Strategi Mitigasi Terverifikasi |
+|---|---|---|---|:---:|---|
+| **R-01** | **Keamanan Aplikasi** | **Stored XSS via WYSIWYG Content**<br>Penulis menyisipkan payload `<script>`, tag `<iframe>` asing, atau atribut `onload` di dalam artikel blog. | Pembajakan sesi admin saat membaca artikel di dashboard, defacement web publik. | **CRITICAL** | 1. Input client divalidasi sebagai pohon AST ProseMirror.<br>2. HTML disanitasi ketat di backend menggunakan pustaka Rust `nh3` dengan *tag/attribute/scheme allowlist* ketat.<br>3. Seluruh tautan otomatis disuntikkan `rel="noopener noreferrer nofollow"`. |
+| **R-02** | **Keamanan Media** | **Eksploitasi SVG Scripting**<br>Pengguna mengunggah gambar `.svg` yang memuat embedded JavaScript XML. | Eksekusi skrip jahat di browser pengunjung saat membuka gambar. | **CRITICAL** | **Larangan Mutlak Berkas SVG**: Format `.svg` ditolak keras oleh backend. Format yang diizinkan eksklusif: `.webp`, `.png`, `.jpg`, `.jpeg`. Verifikasi biner melalui *magic bytes*. |
+| **R-03** | **Keamanan Infrastruktur** | **Decompression Bomb / Pixel Flood**<br>Penyerang mengunggah gambar berukuran file kecil namun berdimensi $50.000 \times 50.000$ piksel. | Crash server akibat kehabisan memori RAM (*Out-Of-Memory / OOM Killer*). | **HIGH** | 1. Menetapkan batas maksimum resolusi `Image.MAX_IMAGE_PIXELS = 16_777_216` (16 Megapiksel / $4096 \times 4096$ px) di Pillow.<br>2. Eskalasi warning Pillow menjadi fatal error `DecompressionBombError`.<br>3. Batas ukuran file maksimal 5 MB di Nginx dan FastAPI. |
+| **R-04** | **Keamanan Sesi** | **Session Hijacking Sibling Subdomain Kampus**<br>Cookie sesi bocor ke subdomain kampus lain di `*.telkomuniversity.ac.id`. | Pembajakan akun pengurus melalui server praktikum/lab mahasiswa lain yang rentan. | **HIGH** | 1. Wajib menggunakan cookie ber-prefix `__Host-himaif_session`.<br>2. Dilarang menyetel atribut `Domain` (murni Host-Only).<br>3. Atribut wajib: `HttpOnly=true`, `Secure=true`, `SameSite=Lax`. |
+| **R-05** | **Keamanan Sesi** | **Cross-Subdomain CSRF (eTLD+1)**<br>Script di subdomain kampus lain memicu request mutasi ke CMS HIMA IF. | Perubahan data artikel atau pengaturan sistem tanpa izin. | **HIGH** | 1. Strict CORS whitelist tanpa regex wildcard.<br>2. Validasi header `Sec-Fetch-Site: same-origin` pada seluruh mutasi data (`POST`, `PUT`, `DELETE`).<br>3. Mewajibkan custom header `X-Requested-With`. |
+| **R-06** | **Operasional & Data** | **Broken Image Pasca-Migrasi Domain**<br>Peralihan dari domain Hostinger ke domain kampus menyebabkan gambar artikel lama gagal dimuat. | Tampilan artikel historis rusak, error 404 pada ratusan gambar. | **HIGH** | 1. **Kontrak Path Relatif**: TipTap hanya menyimpan `/storage/public/{id}.webp`.<br>2. Media dipusatkan di Cloudflare R2 sehingga file tidak perlu dipindahkan antar-VPS.<br>3. Skrip sanitasi regex otomatis disiapkan sebagai fail-safe. |
+| **R-07** | **SEO & Trafik** | **Kehilangan Trafik & Penalti Google Pasca-Migrasi**<br>Link di media sosial (@himaiftelkom) dan hasil pencarian Google menghasilkan error 404 saat domain berganti. | Anjloknya peringkat SEO dan reputasi digital organisasi. | **MEDIUM** | 1. Mempertahankan VPS Hostinger minimal 6–12 bulan sebagai Nginx 301 Permanent Redirector.<br>2. Pendaftaran fitur *Change of Address* di Google Search Console.<br>3. Dynamic sitemap.xml dan canonical URL tag otomatis di Next.js. |
+| **R-08** | **Ketersediaan Layanan** | **Brute-Force Serangan Login Pengurus**<br>Penyerang mencoba menebak password akun admin secara massal. | Kompromi akun Super Admin, beban tinggi pada hashing Argon2id. | **MEDIUM** | 1. Rate limiter IP sliding window via Redis: maksimal 5 percobaan per menit per IP.<br>2. Progressive backoff non-blocking dengan eksekusi dummy Argon2id hash untuk mencegah timing leak enumeration.<br>3. Kebijakan password minimal 12 karakter. |
 
----
-
-## 3. Rencana Keberlanjutan & Tata Kelola Data (Governance & Retention)
-
-### 3.1 Kebijakan Retensi Berkas & Data Pelamar
-1. **Berkas Upload Orphan**:
-   - Seluruh berkas lampiran yang diunggah tetapi tidak direferensikan oleh baris `form_submissions` dalam waktu **24 jam** akan dihapus secara permanen dari object storage melalui task Celery Beat harian.
-2. **Data Pelamar Ditolak**:
-   - Berkas lampiran dihapus permanen dan baris database dianonimkan (seluruh data identitas pribadi seperti NIM, kontak, dan jawaban dihapus/diganti hash anonim) setelah: **[BELUM DIPUTUSKAN]** hari sejak tanggal pengumuman final kepanitiaan.
-3. **Data Pelamar Diterima**:
-   - Kebijakan retensi dan pengarsipan data pelamar yang lolos seleksi: **[BELUM DIPUTUSKAN]**.
-
-### 3.2 Protokol Pergantian Kabinet Tahunan
-- Setiap akhir periode kepengurusan HIMA IF, Super Admin lama wajib melakukan rotasi kredensial utama (`admin@informasite.himaif`), merotasi keypair JWT asimetris (ES256), dan mengarsipkan seluruh formulir kepanitiaan periode tersebut.
-- Riwayat `auth_audit_logs` disimpan selama minimal 2 tahun akademik untuk kebutuhan verifikasi arsip dan audit organisasi mahasiswa.
+Matriks risiko dan asumsi ini menjadi fondasi operasional rekayasa sistem yang aman, andal, dan siap menghadapi skenario migrasi produksi tanpa kendala.

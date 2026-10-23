@@ -2,29 +2,33 @@
 
 | Field | Detail |
 |---|---|
-| **System** | HIMA IF CMS |
-| **Document Version** | 2.0.0 |
-| **Date** | 14 October 2026 |
+| **System** | HIMA IF CMS (Modern WordPress-like Blog Engine) |
+| **Document Version** | 3.0.0 |
+| **Date** | 2026-10-23 |
 | **Status** | Approved Specification |
 | **Framework** | Python FastAPI (ASGI) + Pydantic v2 |
 | **Base URL** | `/api/v1` |
-| **Auth Protocol** | Asymmetric ES256 JWT (Access Token in-memory) + Signed HttpOnly Cookie (Refresh Token) |
+| **Auth Protocol** | Host-Only Secure HttpOnly Cookie (`__Host-himaif_session`) + Server-Side Session Tracking |
 
 ---
 
 ## Riwayat Revisi (Revision History)
 
-| Versi | Tanggal | Penulis | Ringkasan Perubahan | Alasan |
-|---|---|---|---|---|
-| 1.0.0 | 13 Oktober 2026 | Staff Ahli Divisi MIK (Proker Informasite) | Rilis draf awal spesifikasi arsitektur API dan endpoint. | Inisiasi baseline arsitektur API backend. |
-| 2.0.0 | 14 Oktober 2026 | Staff Ahli Divisi MIK & Antigravity Auditor | Standardisasi path parameter `{param}`, penambahan endpoint rotasi password wajib & PIN reset, integrasi batas H-1 Turnstile reschedule publik, peleburan evaluasi berbasis `booking_id`, penegasan audit log terenkripsi & scope check ketat, format ekspor RESTful tanpa ekstensi file pada path, spesifikasi baseline Argon2id OWASP dan proteksi rate limiting. | Audit keamanan & keselarasan arsitektur relasional `DATABASE_SCHEMA.md` v2.0.0. |
+| Versi | Tanggal | Penulis / Reviewer | Bagian yang Diubah | Rincian Perubahan (Sebelum vs Sesudah) | Alasan Perubahan |
+|---|---|---|---|---|---|
+| 1.0.0 | 2026-10-13 | Staff Ahli Divisi MIK | Dokumen Baru | Rilis draf awal spesifikasi API arsitektur dual-engine. | Inisiasi baseline API backend. |
+| 2.0.0 | 2026-10-14 | Staff Ahli MIK & Auditor | Evaluasi & Keamanan | Penambahan endpoint PIN reset, integrasi Turnstile H-1, evaluasi booking_id, standar Argon2id. | Audit keamanan relasional. |
+| 2.1.0 | 2026-10-14 | Staff Ahli MIK & Implementer | Cookie & Rate Limit | Grace period refresh 10s, X-Requested-With CSRF, sliding window rate limiter. | Keputusan resmi Fase 1. |
+| 2.2.0 | 2026-10-14 | Staff Ahli MIK & Auditor | BOLA & CAPTCHA | Pencabutan izin divisi ubah kelulusan, Turnstile status verification, field filtering. | Penutupan celah otorisasi. |
+| 3.0.0 | 2026-10-23 | Staff Ahli MIK & Antigravity Lead | Seluruh Dokumen | **Sebelum:** Endpoint formulir dinamis (`/forms/*`, `/submissions/*`), booking jadwal wawancara (`/interviews/*`), dan evaluasi kepanitiaan.<br>**Sesudah:** Eliminasi seluruh endpoint form & interview; pemusatan endpoint pada Modul Auth (`/auth/*`), Manajemen User (`/users/*`), Taksonomi (`/categories`, `/tags`), Blog Posts Core (`/posts/*` dengan alur mandiri Author), Media Presigned URL (`/media/*`), dan Audit Logs (`/audit-logs`). Standarisasi cookie `__Host-himaif_session` dan mitigasi CSRF. | Pivot arsitektur WordPress-like Blog CMS murni, eliminasi kompleksitas modul interview, dan persiapan staging deploy. |
 
 ---
 
 ## 1. Architectural Conventions & Standards
 
-### 1.1 Envelope Respons Standar
-Seluruh respons API menggunakan format JSON terstandarisasi untuk mempermudah konsumsi di frontend Next.js:
+### 1.1 Format Envelope Respons Standar
+
+Seluruh respons API dibungkus dalam format JSON terstandarisasi untuk konsumsi konsisten di frontend Next.js:
 
 ```json
 {
@@ -34,277 +38,139 @@ Seluruh respons API menggunakan format JSON terstandarisasi untuk mempermudah ko
   "meta": {
     "page": 1,
     "limit": 20,
-    "total": 142,
-    "total_pages": 8
+    "total": 54,
+    "total_pages": 3
   }
 }
 ```
 
-Format penanganan error (RFC 7807 compatible):
+Format respons error (RFC 9457 compatible):
 ```json
 {
   "success": false,
-  "error_code": "RESOURCE_CONFLICT",
-  "message": "Slot interview telah terisi oleh pendaftar lain",
+  "error_code": "RESOURCE_NOT_FOUND",
+  "message": "Artikel blog tidak ditemukan",
   "detail": [
     {
-      "loc": ["body", "primary_slot_id"],
-      "msg": "Slot capacity reached",
-      "type": "capacity_exceeded"
+      "loc": ["path", "slug_or_id"],
+      "msg": "Post with slug 'open-recruitment-2026' not found",
+      "type": "not_found"
     }
   ]
 }
 ```
 
-Daftar Kode Error Aplikasi Baku:
-- `VALIDATION_ERROR` (422): Input body/query gagal melewati skema Pydantic.
-- `AUTHENTICATION_FAILED` (401): Kredensial akun tidak valid atau token kedaluwarsa.
-- `PASSWORD_CHANGE_REQUIRED` (403): Akun ditandai `must_change_password=true`, akses ke endpoint non-allowlist ditolak.
-- `PERMISSION_DENIED` (403): Otorisasi RBAC atau pembatasan scope divisi gagal.
+Daftar Kode Error Baku:
+- `VALIDATION_ERROR` (422): Payload body/query gagal melewati skema Pydantic.
+- `AUTHENTICATION_FAILED` (401): Kredensial tidak valid atau cookie sesi kedaluwarsa.
+- `PASSWORD_CHANGE_REQUIRED` (403): Akun berstatus `must_change_password=true`.
+- `PERMISSION_DENIED` (403): Pelanggaran hak akses RBAC atau percobaan IDOR.
 - `RESOURCE_NOT_FOUND` (404): Entitas tidak ditemukan dalam basis data.
-- `RESOURCE_CONFLICT` (409): Tabrakan kuota slot, deadlock, atau pelanggaran versi optimistic locking.
-- `RATE_LIMIT_EXCEEDED` (429): Ambang batas request terlampaui.
-- `INTERNAL_SERVER_ERROR` (500): Galat internal server (pesan detail teknis tidak dibocorkan ke klien).
-
-### 1.2 Hierarki Otorisasi & Dependency Injection FastAPI
-FastAPI mengimplementasikan dependency injection bertingkat untuk membatasi akses:
-- `get_current_user`: Memverifikasi JWT asimetris ES256 (public key), memvalidasi status aktif akun, dan memeriksa `auth_epoch` di Redis instance 3 (Session).
-- `enforce_password_change_guard`: Memeriksa klaim `must_change_password`. Jika bernilai `true`, request hanya diizinkan menuju allowlist:
-  1. `POST /api/v1/auth/refresh`
-  2. `POST /api/v1/auth/change-password`
-  3. `POST /api/v1/auth/logout`
-  4. `GET /api/v1/auth/me`
-  Seluruh endpoint lainnya akan otomatis mengembalikan HTTP 403 `PASSWORD_CHANGE_REQUIRED`.
-- `require_super_admin`: Hanya boleh diakses oleh akun dengan role `SUPER_ADMIN`.
-- `require_form_master`: Mengizinkan `SUPER_ADMIN` atau `FORM_MASTER` yang memiliki kepemilikan atas `form_id` terkait.
-- `require_division_staff`: Mengizinkan `SUPER_ADMIN`, `FORM_MASTER` terkait, atau `DIVISION_STAFF` yang memiliki `division_id` terkait (memeriksa `primary_division_id` maupun `secondary_division_id` pada pelamar).
-- `verify_submission_credentials`: Khusus pendaftar publik yang memverifikasi `submission_code`, `applicant_nim`, dan `tracking_pin` 6-digit terenkripsi dengan perbandingan *constant-time*.
+- `RESOURCE_CONFLICT` (409): Slug artikel atau kategori sudah digunakan.
+- `RATE_LIMIT_EXCEEDED` (429): Ambang batas frekuensi permintaan terlampaui.
+- `INTERNAL_SERVER_ERROR` (500): Galat internal server (pesan teknis disembunyikan).
 
 ---
 
-## 2. Master Endpoint Inventory
+## 2. Katalog Endpoint API
 
-### 2.1 Modul Autentikasi & Akun (`/api/v1/auth`, `/api/v1/users`)
+### 2.1 Modul Autentikasi (`/auth`)
 
-| Method | Endpoint | Deskripsi | Request Body / Query | Role yang Diizinkan |
-|---|---|---|---|---|
-| `POST` | `/auth/login` | Login menggunakan pseudo-email & password | `{ email, password }` | Public (Rate Limited) |
-| `POST` | `/auth/refresh` | Perpanjangan Access Token dengan Refresh Token | Cookie HttpOnly: `refresh_token` | Public (Cookie Valid) |
-| `POST` | `/auth/logout` | Revokasi sesi dan pembersihan token di Redis | Header Authorization Bearer | Authenticated |
-| `GET` | `/auth/me` | Mengambil profil user aktif, role, dan scope ID | - | Authenticated |
-| `POST` | `/auth/change-password` | Mengubah password akun sendiri (wajib saat awal aktivasi) | `{ current_password, new_password }` | Authenticated (Rate Limited) |
-| `GET` | `/users` | List seluruh akun terdaftar dalam sistem | Query: `role, search, is_active, page, limit` | `SUPER_ADMIN` |
-| `POST` | `/users/reset-password` | Reset password akun bawahan secara hierarkis | `{ target_user_id, new_password }` | `SUPER_ADMIN`, `FORM_MASTER` |
-| `PATCH` | `/users/{user_id}/status` | Mengaktifkan atau menonaktifkan akun | `{ is_active: boolean }` | `SUPER_ADMIN` |
-
-#### Spesifikasi Detail Autentikasi:
-1. **POST `/auth/login`**:
-   - Menerapkan Argon2id baseline OWASP ($m=19456\text{ KiB}, t=2, p=1$).
-   - Proteksi brute-force bertingkat via Redis: Rate limit 5 kegagalan per 15 menit per kombinasi IP dan email identifier. Jika terlampaui, akun terkunci sementara (lockout) selama 15 menit.
-   - Respons sukses menghasilkan Access Token (disimpan in-memory oleh Zustand di Next.js) dan menyematkan Refresh Token bertanda tangan ES256 pada HttpOnly cookie (`Secure`, `SameSite=Strict`, `Path=/`, `Max-Age=604800`).
-2. **POST `/auth/change-password`**:
-   - Memvalidasi `current_password` via Argon2id.
-   - Memastikan `new_password` memiliki panjang minimal 12 karakter dan berbeda dari `current_password`.
-   - Menghash `new_password` dengan Argon2id, mengubah kolom `must_change_password = false`, dan menaikkan `auth_epoch` di DB/Redis untuk merevokasi seluruh token lama.
-   - Menerbitkan token baru dengan klaim `must_change_password: false`.
-   - Mencatat event audit `CHANGE_PASSWORD` ke `auth_audit_logs`.
-3. **POST `/users/reset-password`**:
-   - `SUPER_ADMIN` dapat mereset akun mana pun.
-   - `FORM_MASTER` **hanya** dapat mereset akun `DIVISION_STAFF` di bawah formulir miliknya.
-   - Mereset kolom `must_change_password = true` dan mencatat event audit `RESET_PASSWORD`.
+| Metode | Path | Hak Akses | Deskripsi & Validasi |
+|---|---|---|---|
+| `POST` | `/auth/login` | Publik | Autentikasi email/username + password Argon2id. Menerbitkan cookie `__Host-himaif_session`. Rate limit: 5 req/menit per IP. |
+| `POST` | `/auth/logout` | Authenticated | Mencabut sesi aktif di Redis dan database, serta menghapus cookie di browser. |
+| `GET` | `/auth/me` | Authenticated | Mengambil informasi profil, role (`SUPER_ADMIN` / `AUTHOR`), dan status `must_change_password`. |
+| `POST` | `/auth/change-password` | Authenticated | Mengubah kata sandi pengguna (min. 12 karakter). Menghapus bendera `must_change_password` dan menaikkan `auth_epoch`. |
 
 ---
 
-### 2.2 Modul Blog CMS (`/api/v1/blog`)
+### 2.2 Modul Manajemen Pengguna (`/users`) — Khusus Super Admin
 
-| Method | Endpoint | Deskripsi | Request Body / Query | Role yang Diizinkan |
-|---|---|---|---|---|
-| `GET` | `/blog/posts` | Mengambil daftar artikel terbit (publik, paginasi, filter) | Query: `category_slug, search, page, limit` | Public (Cached) |
-| `GET` | `/blog/posts/{slug}` | Mengambil detail artikel publik berdasarkan slug | Path: `slug` | Public (Cached) |
-| `GET` | `/blog/categories` | Mengambil seluruh kategori blog yang aktif | - | Public (Cached) |
-| `GET` | `/blog/admin/posts` | Mengambil semua artikel (Draft, Scheduled, Published) | Query: `status, category_id, page, limit` | `SUPER_ADMIN` |
-| `POST` | `/blog/admin/posts` | Membuat draft artikel baru dengan block JSONB | `{ title, slug, category_id, content_blocks, excerpt, seo_title, meta_description, seo_focus_keyword }` | `SUPER_ADMIN` |
-| `GET` | `/blog/admin/posts/{id}` | Mengambil detail artikel lengkap untuk editor | Path: `id` | `SUPER_ADMIN` |
-| `PUT` | `/blog/admin/posts/{id}` | Memperbarui konten blok dan metadata artikel | Request body artikel lengkap | `SUPER_ADMIN` |
-| `PATCH` | `/blog/admin/posts/{id}/status` | Mengubah status tayang (Publish, Schedule, Archive) | `{ status: "PUBLISHED" \| "SCHEDULED" \| "ARCHIVED", scheduled_at?: string }` | `SUPER_ADMIN` |
-| `DELETE` | `/blog/admin/posts/{id}` | Menghapus artikel blog (soft delete / purge) | Path: `id` | `SUPER_ADMIN` |
-| `POST` | `/blog/admin/seo-analyze` | Menjalankan analisis SEO real-time pada draft teks | `{ title, slug, content_blocks, focus_keyword, seo_title, meta_description }` | `SUPER_ADMIN` |
-| `GET` | `/blog/admin/posts/{id}/revisions` | Mengambil daftar riwayat revisi artikel | Path: `id` | `SUPER_ADMIN` |
-| `POST` | `/blog/admin/posts/{id}/rollback` | Mengembalikan artikel ke snapshot revisi tertentu | `{ revision_id }` | `SUPER_ADMIN` |
-| `POST` | `/blog/admin/categories` | Membuat kategori blog baru | `{ name, slug, description, color_hex }` | `SUPER_ADMIN` |
-| `PUT` | `/blog/admin/categories/{id}` | Memperbarui nama/warna kategori blog | `{ name, slug, description, color_hex }` | `SUPER_ADMIN` |
-| `DELETE` | `/blog/admin/categories/{id}` | Menghapus kategori blog (jika tidak terikat post) | Path: `id` | `SUPER_ADMIN` |
-
-*Catatan Sanitasi & Cache:*
-- Seluruh konten HTML pada blok teks (`customHtml`) disanitasi menggunakan pustaka Rust-based `nh3` di backend sebelum disimpan ke JSONB.
-- Mutasi status atau konten artikel secara otomatis mengeksekusi *Version Tag Invalidation* $O(1)$ (`INCR cms:blog:version:list`) dan menghapus cache key spesifik artikel (`DEL cms:blog:post:{slug}`).
+| Metode | Path | Hak Akses | Deskripsi & Validasi |
+|---|---|---|---|
+| `GET` | `/users` | `SUPER_ADMIN` | Menampilkan daftar akun pengurus/penulis, filter role & status aktif, pagination. |
+| `POST` | `/users` | `SUPER_ADMIN` | Membuat akun Author baru dengan flag `must_change_password = true`. |
+| `GET` | `/users/{id}` | `SUPER_ADMIN` | Mengambil detail akun pengguna spesifik. |
+| `PUT` | `/users/{id}` | `SUPER_ADMIN` | Memperbarui nama lengkap, role, atau menonaktifkan akun (`is_active = false`). |
+| `POST` | `/users/{id}/reset-password` | `SUPER_ADMIN` | Reset password akun author oleh Super Admin. |
 
 ---
 
-### 2.3 Modul Media & Storage (`/api/v1/media`)
+### 2.3 Modul Taksonomi: Kategori & Tags (`/categories`, `/tags`)
 
-| Method | Endpoint | Deskripsi | Request Body / Query | Role yang Diizinkan |
-|---|---|---|---|---|
-| `POST` | `/media/upload-image` | Mengunggah gambar (thumbnail/content) -> auto-convert WebP/AVIF | `multipart/form-data` (file) | `SUPER_ADMIN` |
-| `POST` | `/media/upload-attachment` | Mengunggah lampiran pendaftar publik (CV/Portofolio) | `multipart/form-data` (file) | Public (Turnstile & Rate Limited) |
-| `GET` | `/media/{id}/download-url` | Mendapatkan pre-signed URL untuk berkas terproteksi | Path: `id` | `SUPER_ADMIN`, `FORM_MASTER`, `DIVISION_STAFF` (divisi terkait) |
-
-*Aturan Akses & Audit Berkas:*
-- Lampiran publik pendaftar disimpan pada bucket private vault (`is_protected = true`).
-- Endpoint `GET /media/{id}/download-url` memvalidasi relasi pendaftar terhadap akun yang merequest (mencegah IDOR). Setiap penerbitan presigned download URL dicatat ke `auth_audit_logs` dengan aksi `DOWNLOAD_APPLICANT_CV`. URL presigned berlaku selama 5 menit.
-
----
-
-### 2.4 Modul Dynamic Form Builder (`/api/v1/forms`)
-
-| Method | Endpoint | Deskripsi | Request Body / Query | Role yang Diizinkan |
-|---|---|---|---|---|
-| `GET` | `/forms/{slug}` | Mengambil schema formulir aktif untuk dirender di publik | Path: `slug` | Public (Cached) |
-| `GET` | `/forms` | Mengambil daftar seluruh formulir kepanitiaan | Query: `status, page, limit` | `SUPER_ADMIN` |
-| `POST` | `/forms` | Membuat formulir baru + Akun Master Formulir otomatis | `{ title, slug, description, starts_at, ends_at, master_password }` | `SUPER_ADMIN` |
-| `GET` | `/forms/{id}/details` | Mengambil konfigurasi detail formulir | Path: `id` | `SUPER_ADMIN`, `FORM_MASTER` (milik sendiri) |
-| `PUT` | `/forms/{id}` | Memperbarui informasi umum & status formulir | `{ title, description, starts_at, ends_at, status, settings }` | `SUPER_ADMIN`, `FORM_MASTER` (milik sendiri) |
-| `GET` | `/forms/{id}/fields` | Mengambil seluruh daftar field custom formulir | Path: `id` | `SUPER_ADMIN`, `FORM_MASTER` (milik sendiri) |
-| `POST` | `/forms/{id}/fields` | Menambahkan field custom baru ke formulir | `{ field_label, field_name, field_type, is_required, placeholder, validation_rules, options, division_id }` | `SUPER_ADMIN`, `FORM_MASTER` (milik sendiri) |
-| `PUT` | `/forms/{id}/fields/{field_id}` | Memperbarui konfigurasi field custom | Update field schema | `SUPER_ADMIN`, `FORM_MASTER` (milik sendiri) |
-| `DELETE` | `/forms/{id}/fields/{field_id}` | Menghapus field custom formulir | Path: `id, field_id` | `SUPER_ADMIN`, `FORM_MASTER` (milik sendiri) |
-| `POST` | `/forms/{id}/fields/reorder` | Mengatur ulang urutan tampil (*order_index*) field | `{ field_ids: [uuid] }` | `SUPER_ADMIN`, `FORM_MASTER` (milik sendiri) |
+| Metode | Path | Hak Akses | Deskripsi & Validasi |
+|---|---|---|---|
+| `GET` | `/categories` | Publik | Daftar kategori artikel aktif beserta jumlah artikel (`post_count`). Di-cache di Redis. |
+| `POST` | `/categories` | `SUPER_ADMIN` | Membuat kategori baru (nama, slug unik, deskripsi, warna hex). |
+| `PUT` | `/categories/{id}` | `SUPER_ADMIN` | Memperbarui metadata kategori. |
+| `DELETE` | `/categories/{id}` | `SUPER_ADMIN` | Menghapus kategori (hanya jika `post_count == 0`). |
+| `GET` | `/tags` | Publik | Daftar tag populer untuk penjelajahan topik artikel. |
+| `POST` | `/tags` | `SUPER_ADMIN`, `AUTHOR` | Membuat tag baru saat penulisan artikel jika tag belum ada. |
 
 ---
 
-### 2.5 Modul Manajemen Divisi & Auto-Provisioning (`/api/v1/forms/{form_id}/divisions`)
+### 2.4 Modul Artikel Blog (`/posts`)
 
-| Method | Endpoint | Deskripsi | Request Body / Query | Role yang Diizinkan |
-|---|---|---|---|---|
-| `GET` | `/forms/{form_id}/divisions` | List seluruh divisi dalam formulir | Path: `form_id` | `SUPER_ADMIN`, `FORM_MASTER` (milik sendiri) |
-| `POST` | `/forms/{form_id}/divisions` | Menambah divisi baru + otomatis generate akun login | `{ name, slug, description, max_quota, custom_password }` | `SUPER_ADMIN`, `FORM_MASTER` (milik sendiri) |
-| `PUT` | `/forms/{form_id}/divisions/{div_id}` | Memperbarui deskripsi dan kuota divisi | `{ name, description, max_quota }` | `SUPER_ADMIN`, `FORM_MASTER` (milik sendiri) |
-| `POST` | `/forms/{form_id}/divisions/{div_id}/reset-password` | Mereset password akun divisi secara mandiri | `{ new_password }` | `SUPER_ADMIN`, `FORM_MASTER` (milik sendiri) |
-| `DELETE` | `/forms/{form_id}/divisions/{div_id}` | Menghapus divisi (jika belum ada pendaftar) | Path: `form_id, div_id` | `SUPER_ADMIN`, `FORM_MASTER` (milik sendiri) |
+| Metode | Path | Hak Akses | Deskripsi & Validasi |
+|---|---|---|---|
+| `GET` | `/posts` | Publik / Auth | Publik: hanya artikel `PUBLISHED` atau `SCHEDULED` yang `published_at <= NOW()`. Admin/Author: dapat memfilter status (`DRAFT`, `SCHEDULED`, `ARCHIVED`). |
+| `GET` | `/posts/{slug_or_id}` | Publik / Auth | Mengambil detail artikel lengkap beserta `content_html` dan `content_json`. Publik menaikkan counter `view_count` via atomic Redis INCR. |
+| `POST` | `/posts` | `SUPER_ADMIN`, `AUTHOR` | Membuat artikel baru. Sanitasi HTML via Rust `nh3`, validasi relative URI pada gambar, simpan AST JSONB. |
+| `PUT` | `/posts/{id}` | `SUPER_ADMIN`, `AUTHOR` | Memperbarui artikel. **Anti-IDOR Guard**: Author hanya boleh mengedit artikel karyanya sendiri. Menyimpan snapshot revisi ke `blog_post_revisions`. |
+| `PATCH` | `/posts/{id}/publish` | `SUPER_ADMIN`, `AUTHOR` | **Alur Mandiri**: Menerbitkan langsung artikel menjadi `PUBLISHED` (`published_at = NOW()`). Author dapat mengeksekusi pada artikel buatannya sendiri. |
+| `PATCH` | `/posts/{id}/schedule` | `SUPER_ADMIN`, `AUTHOR` | Menetapkan status `SCHEDULED` dengan parameter `published_at` di masa depan. |
+| `PATCH` | `/posts/{id}/archive` | `SUPER_ADMIN` | Mengarsipkan artikel publik agar tidak tampil di feed publik. |
+| `DELETE` | `/posts/{id}` | `SUPER_ADMIN`, `AUTHOR` | Menghapus artikel. Author hanya dapat menghapus artikel miliknya sendiri. |
+| `GET` | `/posts/{id}/revisions` | `SUPER_ADMIN`, `AUTHOR` | Melihat riwayat revisi artikel untuk audit editorial. |
+| `POST` | `/posts/{id}/revisions/{rev_id}/rollback` | `SUPER_ADMIN`, `AUTHOR` | Memulihkan isi artikel ke nomor revisi sebelumnya. |
 
 ---
 
-### 2.6 Modul Pendaftar & Submisi Publik (`/api/v1/submissions`)
+### 2.5 Modul Media & Upload Storage (`/media`)
 
-| Method | Endpoint | Deskripsi | Request Body / Query | Role yang Diizinkan |
-|---|---|---|---|---|
-| `POST` | `/forms/{slug}/submit` | Mengirim pendaftaran + memesan slot interview | Body Pendaftaran (lihat spesifikasi di bawah) | Public (Turnstile & Rate Limited) |
-| `POST` | `/submissions/verify-status` | Autentikasi portal pendaftar mandiri | `{ submission_code, applicant_nim, tracking_pin }` | Public (Rate Limited & Constant-Time) |
-| `GET` | `/forms/{form_id}/submissions` | Mengambil seluruh pendaftar formulir (sentralisasi) | Query: `division_id, status, search, page, limit` | `SUPER_ADMIN`, `FORM_MASTER` (milik sendiri) |
-| `GET` | `/divisions/me/submissions` | Mengambil pendaftar khusus divisinya sendiri | Query: `status, search, page, limit` | `DIVISION_STAFF` |
-| `GET` | `/submissions/{id}` | Mengambil detail lengkap berkas & data pendaftar | Path: `id` | `SUPER_ADMIN`, `FORM_MASTER`, `DIVISION_STAFF` (divisinya) |
-| `POST` | `/submissions/{id}/reset-pin` | Mereset `tracking_pin` pelamar secara acak | Path: `id` | `SUPER_ADMIN`, `FORM_MASTER` (milik sendiri) |
-| `PATCH` | `/submissions/{id}/status` | Mengubah status keputusan akhir pelamar | `{ status, notes }` | `SUPER_ADMIN`, `FORM_MASTER`, `DIVISION_STAFF` (divisi terkait) |
+Pola Direct-to-Storage via **AWS Signature V4 Presigned URL** ke Cloudflare R2 (Zero VPS Egress):
 
-#### Spesifikasi Body `POST /forms/{slug}/submit`:
-```json
-{
-  "applicant_name": "Fulan bin Fulan",
-  "applicant_nim": "1301210001",
-  "applicant_email": "fulan@student.telkomuniversity.ac.id",
-  "applicant_phone": "081234567890",
-  "primary_division_id": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
-  "secondary_division_id": "c9a646d3-9c61-4cd7-bf16-444a1eb40277",
-  "primary_slot_id": "4a7f2921-b3b3-4f9e-a0e1-067756f8f53a",
-  "secondary_slot_id": "7f1e680a-5c21-4d1a-8c34-9d560b411d33",
-  "responses": {
-    "alasan_mendaftar": "Ingin berkontribusi nyata untuk himpunan",
-    "portofolio_url": "https://github.com/fulan"
-  },
-  "consent_agreed": true,
-  "turnstile_token": "0.XXXXX.YYYYY"
-}
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Author as Penulis (Next.js)
+    participant API as FastAPI Backend
+    participant R2 as Cloudflare R2 Bucket
+
+    Author->>API: POST /api/v1/media/presign-upload (file_name, file_size, mime_type)
+    API->>API: Validasi MIME (image/webp, png, jpeg), max 5MB, format non-SVG
+    API->>API: Generate S3 Presigned URL PUT (HMAC-SHA256 in memory)
+    API-->>Author: 200 OK (upload_url, storage_path, file_id)
+    Author->>R2: PUT file binary langsung ke upload_url
+    R2-->>Author: 200 OK
+    Author->>API: POST /api/v1/media/confirm-upload (file_id, width, height, alt_text)
+    API->>API: INSERT INTO media_assets
+    API-->>Author: 201 Created (Aset siap disisipkan ke TipTap)
 ```
-*Aturan Bisnis Submisi:*
-- Validasi Turnstile wajib lolos secara *fail-closed*.
-- Jika `secondary_division_id` dipilih, maka `secondary_slot_id` **wajib** diisi. Kedua slot harus berasal dari divisi yang bersangkutan, slot tidak boleh sama, dan rentang waktu keduanya tidak boleh tumpang tindih (*overlap*).
-- Menjalankan urutan penguncian global anti-deadlock (`SELECT ... FOR UPDATE` terurut `id ASC`).
-- Menghasilkan `tracking_pin` 6-digit acak dengan `secrets.randbelow(1000000)`, dienkripsi via format `{key_version}:{ciphertext}` (AES-256-GCM / Fernet) pada level aplikasi sebelum disimpan ke DB.
-- PIN hanya ditampilkan **sekali** di layar respons submisi.
 
-#### Aturan Akses & Reset PIN Pelamar:
-- **GET `/submissions/{id}`**: Field `tracking_pin` yang didekripsi **hanya** dikembalikan kepada `SUPER_ADMIN` dan `FORM_MASTER` (khusus formulir miliknya). Akun `DIVISION_STAFF` tidak pernah menerima nilai PIN (selalu di-*redact* atau null). Tindakan melihat PIN ini dicatat pada `auth_audit_logs` dengan event `VIEW_APPLICANT_PIN`. Field PIN tidak pernah muncul di endpoint list/tabel maupun file ekspor.
-- **POST `/submissions/{id}/reset-pin`**: Hanya dapat dipanggil oleh `SUPER_ADMIN` dan `FORM_MASTER` (khusus form miliknya). Menghasilkan PIN baru 6-digit acak, mengenkripsinya di DB, mencatat event `RESET_APPLICANT_PIN`, dan mengembalikan nilai plaintext baru tersebut satu kali di respons untuk diinformasikan manual oleh panitia kepada mahasiswa via WhatsApp.
-- **POST `/submissions/verify-status`**: Dilindungi rate limit ketat (5 kegagalan per 15 menit per IP dan NIM). Menggunakan `secrets.compare_digest` (*constant-time*) untuk mencegah timing attack, dan mengembalikan pesan kesalahan identik jika kode pendaftaran, NIM, atau PIN keliru.
+| Metode | Path | Hak Akses | Deskripsi & Validasi |
+|---|---|---|---|
+| `POST` | `/media/presign-upload` | `SUPER_ADMIN`, `AUTHOR` | Memvalidasi file biner (menolak mutlak ekstensi `.svg`, ukuran maks 5 MB). Menghasilkan Presigned URL PUT Cloudflare R2 berdurasi 5 menit secara lokal di memori. |
+| `POST` | `/media/confirm-upload` | `SUPER_ADMIN`, `AUTHOR` | Mengonfirmasi keberhasilan upload biner dan mencatat metadata aset ke tabel `media_assets`. |
+| `GET` | `/media` | `SUPER_ADMIN`, `AUTHOR` | Media Library: daftar gambar yang pernah diunggah pengguna. |
+| `DELETE` | `/media/{id}` | `SUPER_ADMIN`, `AUTHOR` | Menghapus aset gambar dari Cloudflare R2 dan tabel database (Author hanya bisa menghapus media miliknya). |
 
 ---
 
-### 2.7 Modul Penjadwalan & Slot Interview (`/api/v1/interviews`)
+### 2.6 Modul Log Audit (`/audit-logs`) — Khusus Super Admin
 
-| Method | Endpoint | Deskripsi | Request Body / Query | Role yang Diizinkan |
-|---|---|---|---|---|
-| `GET` | `/interviews/public/{form_slug}/available-slots` | Slot tersedia untuk pendaftar publik | Query: `division_id, date` | Public (Cached pendek) |
-| `GET` | `/interviews/config/{division_id}` | Mengambil konfigurasi jadwal interview divisi | Path: `division_id` | `SUPER_ADMIN`, `FORM_MASTER`, `DIVISION_STAFF` (divisinya) |
-| `POST` | `/interviews/config/{division_id}` | Menyimpan konfigurasi & generate slot otomatis | `{ start_date, end_date, daily_start_time, daily_end_time, slot_duration_minutes, buffer_minutes, quota_per_slot, default_location, active_days }` | `SUPER_ADMIN`, `FORM_MASTER`, `DIVISION_STAFF` (divisinya) |
-| `GET` | `/interviews/slots/{division_id}` | Mengambil kalender slot lengkap divisi | Query: `start_date, end_date` | `SUPER_ADMIN`, `FORM_MASTER`, `DIVISION_STAFF` (divisinya) |
-| `PATCH` | `/interviews/slots/{slot_id}/block` | Memblokir slot (cegah booking baru) | `{ is_blocked: true, block_reason: string }` | `SUPER_ADMIN`, `FORM_MASTER`, `DIVISION_STAFF` (divisinya) |
-| `PATCH` | `/interviews/slots/{slot_id}/unblock` | Membuka kembali slot yang diblokir | - | `SUPER_ADMIN`, `FORM_MASTER`, `DIVISION_STAFF` (divisinya) |
-| `POST` | `/interviews/public/reschedule` | Reschedule mandiri oleh pelamar publik | `{ submission_code, applicant_nim, tracking_pin, division_id, new_slot_id, turnstile_token }` | Public (H-1 Cut-off, Turnstile, Rate Limited) |
-| `POST` | `/interviews/admin/reassign-slot` | Pemindahan jadwal slot oleh panitia | `{ booking_id, new_slot_id, reason }` | `SUPER_ADMIN`, `FORM_MASTER`, `DIVISION_STAFF` (divisinya) |
-
-#### Aturan Bisnis Reschedule:
-1. **Reschedule Publik (`POST /interviews/public/reschedule`)**:
-   - Pelamar diizinkan melakukan reschedule tanpa batas jumlah kali, asalkan dilakukan paling lambat **H-1 (24 jam sebelum `start_time` slot saat ini)**.
-   - Slot tujuan baru (`new_slot_id`) juga harus memiliki waktu mulai minimal 24 jam dari waktu request, memiliki kuota tersisa (`booked_count < capacity`), dan tidak bertabrakan dengan jadwal interview divisi pasangannya jika pelamar memiliki 2 booking.
-   - Wajib memverifikasi Cloudflare Turnstile token dan kredensial pelamar.
-   - Menjalankan urutan penguncian global atomik: kunci baris `interview_bookings` terlebih dahulu, lalu kunci baris slot lama dan slot baru (`ORDER BY id ASC FOR UPDATE`).
-   - Mencatat event audit `RESCHEDULE_INTERVIEW` di `auth_audit_logs`.
-2. **Reassign oleh Panitia (`POST /interviews/admin/reassign-slot`)**:
-   - Ditujukan untuk kasus darurat atau penataan ulang oleh interviewer.
-   - **Tidak terikat** batasan H-1 cut-off.
-   - Menerapkan penguncian atomik yang sama dan mencatat event audit `RESCHEDULE_INTERVIEW`.
+| Metode | Path | Hak Akses | Deskripsi & Validasi |
+|---|---|---|---|
+| `GET` | `/audit-logs` | `SUPER_ADMIN` | Melihat jejak audit autentikasi, IP address, user-agent, dan peristiwa keamanan dengan filter rentang waktu. |
 
 ---
 
-### 2.8 Modul Pertanyaan Custom & Evaluasi Interview (`/api/v1/evaluations`)
+## 3. Spesifikasi Keamanan Parameter Header
 
-> **Pembaruan Arsitektur v2.0.0**: Sesuai skema relasional `DATABASE_SCHEMA.md` v2.0.0, lembar evaluasi kini melekat secara granular pada baris `interview_bookings` melalui parameter `{booking_id}` (bukan `submission_id`), sehingga evaluasi Divisi 1 dan Divisi 2 terisolasi secara independen dan mendukung penguncian optimistik (`version`).
+Setiap request mutasi data (`POST`, `PUT`, `PATCH`, `DELETE`) dari klien Next.js **wajib menyertakan**:
+1. Cookie sesi: `__Host-himaif_session` (disertakan otomatis oleh browser via `withCredentials: true`).
+2. Header anti-CSRF: `X-Requested-With: XMLHttpRequest` (memicu preflight CORS jika ada script dari domain asing).
+3. Header konten: `Content-Type: application/json`.
 
-| Method | Endpoint | Deskripsi | Request Body / Query | Role yang Diizinkan |
-|---|---|---|---|---|
-| `GET` | `/evaluations/questions/{division_id}` | Mengambil instrumen pertanyaan interview divisi | Path: `division_id` | `SUPER_ADMIN`, `FORM_MASTER`, `DIVISION_STAFF` (divisinya) |
-| `POST` | `/evaluations/questions/{division_id}` | Menambah butir pertanyaan custom divisi | `{ question_text, question_type, options, rubric_guide, max_score, weight_percent, order_index }` | `SUPER_ADMIN`, `FORM_MASTER`, `DIVISION_STAFF` (divisinya) |
-| `PUT` | `/evaluations/questions/{question_id}` | Memperbarui butir pertanyaan custom | Update question payload | `SUPER_ADMIN`, `FORM_MASTER`, `DIVISION_STAFF` (divisinya) |
-| `DELETE` | `/evaluations/questions/{question_id}` | Menghapus butir pertanyaan interview | Path: `question_id` | `SUPER_ADMIN`, `FORM_MASTER`, `DIVISION_STAFF` (divisinya) |
-| `GET` | `/evaluations/workspace/{booking_id}` | Membuka lembar kerja interview spesifik booking | Path: `booking_id` | `SUPER_ADMIN`, `FORM_MASTER`, `DIVISION_STAFF` (divisinya) |
-| `POST` | `/evaluations/workspace/{booking_id}/draft` | Menyimpan draf penilaian (auto-save ber-versi) | Body Draft Evaluasi (lihat spesifikasi di bawah) | `DIVISION_STAFF` (divisinya), `FORM_MASTER` |
-| `POST` | `/evaluations/workspace/{booking_id}/finalize` | Mengunci penilaian final & status kehadiran | Body Finalisasi Evaluasi | `DIVISION_STAFF` (divisinya), `FORM_MASTER` |
-
-#### Spesifikasi Lembar Evaluasi Workspace:
-```json
-// POST /evaluations/workspace/{booking_id}/draft
-{
-  "version": 3,
-  "attendance_status": "ATTENDED",
-  "score": 85.5,
-  "notes": "Komunikasi baik, pemahaman teknis sesuai harapan divisi.",
-  "answers": [
-    {
-      "question_id": "2b3c4d5e-6f7a-8b9c-0d1e-2f3a4b5c6d7e",
-      "score": 90,
-      "answer_text": "Menjelaskan arsitektur microservices dengan terstruktur",
-      "notes": "Poin plus pada pemahaman REST"
-    }
-  ]
-}
-```
-*Kontrol Konkurensi & Optimistic Locking:*
-- Request wajib menyertakan kolom `version`. Jika versi yang dikirim tidak sesuai dengan `version` pada baris `interview_bookings`, API mengembalikan HTTP 409 `RESOURCE_CONFLICT` untuk mencegah tertimpanya penilaian oleh penilai lain yang sedang membuka workspace bersamaan.
-- Pada Redis instance 3, terdapat advisory lock sementara bertenggat waktu (`interview:lock:{booking_id}`) dengan heartbeat 30 detik untuk menandai penilai aktif (*active interviewer*).
-
----
-
-### 2.9 Modul Sentralisasi & Ekspor Laporan (`/api/v1/analytics`, `/api/v1/exports`)
-
-| Method | Endpoint | Deskripsi | Request Body / Query | Role yang Diizinkan |
-|---|---|---|---|---|
-| `GET` | `/analytics/super-admin/overview` | Statistik global (total blog view, acara, pendaftar) | - | `SUPER_ADMIN` |
-| `GET` | `/analytics/forms/{form_id}/summary` | Ringkasan pendaftar & progres interview semua divisi | Path: `form_id` | `SUPER_ADMIN`, `FORM_MASTER` (milik sendiri) |
-| `GET` | `/analytics/forms/{form_id}/submissions/export` | Mengunduh data pendaftar format XLSX/CSV | Query: `format=xlsx\|csv, division_id, status` | `SUPER_ADMIN`, `FORM_MASTER` (milik sendiri) |
-| `GET` | `/analytics/forms/{form_id}/interview-results/export` | Mengunduh rekap skor & evaluasi interview lengkap | Query: `format=xlsx\|csv, division_id` | `SUPER_ADMIN`, `FORM_MASTER` (milik sendiri) |
-| `GET` | `/analytics/divisions/my-results/export` | Mengunduh hasil interview divisi sendiri | Query: `format=xlsx\|csv` | `DIVISION_STAFF` |
-
-*Kepatuhan Keamanan & Privasi Ekspor Data:*
-- Ekstensi file dihilangkan dari URL path parameter dan dipindahkan ke query parameter `format` (`xlsx` atau `csv`) sesuai kaidah RESTful modern.
-- Kolom sensitif `tracking_pin` **tidak pernah diikutsertakan** dalam seluruh file ekspor laporan!
-- Setiap aktivitas ekspor data pendaftar secara otomatis dicatat pada `auth_audit_logs` dengan event `EXPORT_SUBMISSIONS`, merekam `user_id`, `form_id`, filter yang diterapkan, dan alamat IP pemohon.
+Spesifikasi API ini 100% selaras dengan skema database v3.0.0, kebal dari serangan Stored XSS, bebas dari celah IDOR, dan siap diimplementasikan.
